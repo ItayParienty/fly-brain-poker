@@ -102,7 +102,7 @@ python game.py               # one scripted heads-up hand
 - [x] Vectorised leaky integrate-and-fire simulation (multiple flies in parallel)
 - [x] Calibrate to biological sparseness, verify separation and reliability
 - [x] Texas Hold'em engine (heads-up, fixed raise sizes)
-- [ ] Encode game state as an odour; decode MBON balance into an action
+- [x] Encode game state as an odour; decode MBON balance into an action
 - [ ] Dopamine-gated learning: winning a pot is food
 - [ ] Multi-way table
 - [ ] Visualisation, and a seat for a human player

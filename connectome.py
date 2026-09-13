@@ -62,11 +62,13 @@ MODULATORS = {"DA", "SER", "OCT"}
 class Circuit:
     """A connectome subcircuit, ready to simulate."""
 
-    def __init__(self, neuron_ids, neuron_classes, weights, modulatory):
+    def __init__(self, neuron_ids, neuron_classes, weights, modulatory,
+                 neuron_nt=None):
         self.neuron_ids = neuron_ids          # FlyWire root_id per index
         self.neuron_classes = neuron_classes  # class name per index
         self.weights = weights                # signed sparse matrix [post, pre]
         self.modulatory = modulatory          # DA/SER/OCT edges, same layout
+        self.neuron_nt = neuron_nt            # each neuron's own transmitter
 
     @property
     def n_neurons(self):
@@ -75,6 +77,11 @@ class Circuit:
     def indices_of(self, class_name):
         """Row/column indices of every neuron in a given class."""
         return np.flatnonzero(self.neuron_classes == class_name)
+
+    def indices_of_nt(self, class_name, nt_type):
+        """Neurons of a class that release a given neurotransmitter."""
+        return np.flatnonzero((self.neuron_classes == class_name)
+                              & (self.neuron_nt == nt_type))
 
     def summary(self):
         lines = [f"{self.n_neurons:,} neurons, {self.weights.nnz:,} fast connections"]
@@ -97,6 +104,10 @@ def build_circuit(classes=None, weight_scale=1.0, data_dir=DATA_DIR):
     neuron_classes = annotations["class"].to_numpy()
     index_of = {root_id: i for i, root_id in enumerate(neuron_ids)}
 
+    transmitters = pd.read_csv(data_dir / "neurons.csv.gz")[["root_id", "nt_type"]]
+    nt_of = dict(zip(transmitters.root_id, transmitters.nt_type))
+    neuron_nt = np.array([str(nt_of.get(rid, "UNK")) for rid in neuron_ids])
+
     connections = pd.read_csv(data_dir / "connections.csv.gz")
     inside = (connections.pre_root_id.isin(index_of)
               & connections.post_root_id.isin(index_of))
@@ -117,7 +128,7 @@ def build_circuit(classes=None, weight_scale=1.0, data_dir=DATA_DIR):
     modulatory = sparse.csr_matrix(
         (counts[is_modulator], (post[is_modulator], pre[is_modulator])), shape=shape)
 
-    return Circuit(neuron_ids, neuron_classes, fast, modulatory)
+    return Circuit(neuron_ids, neuron_classes, fast, modulatory, neuron_nt)
 
 
 def load_circuit(weight_scale=DEFAULT_WEIGHT_SCALE, rebuild=False, data_dir=DATA_DIR):
@@ -133,13 +144,15 @@ def load_circuit(weight_scale=DEFAULT_WEIGHT_SCALE, rebuild=False, data_dir=DATA
         modulatory = sparse.csr_matrix(
             (blob["mod_data"], blob["mod_indices"], blob["mod_indptr"]), shape=shape)
         fast.data = fast.data * weight_scale
-        return Circuit(blob["neuron_ids"], blob["neuron_classes"], fast, modulatory)
+        return Circuit(blob["neuron_ids"], blob["neuron_classes"], fast, modulatory,
+                       blob["neuron_nt"])
 
     circuit = build_circuit(weight_scale=1.0, data_dir=data_dir)
     np.savez_compressed(
         cache,
         neuron_ids=circuit.neuron_ids,
         neuron_classes=circuit.neuron_classes,
+        neuron_nt=circuit.neuron_nt,
         shape=np.array(circuit.weights.shape),
         fast_data=circuit.weights.data,
         fast_indices=circuit.weights.indices,
