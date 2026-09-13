@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# FlyWire connectome tables and derived caches - fetched by download_data.py,
+# not redistributed here (see CITATION.md).
+data/
+*.npz
