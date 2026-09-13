@@ -21,8 +21,11 @@ What the fly is GIVEN is perception: how strong its hand is, what the pot
 odds are. What it has to LEARN is what to do about it.
 """
 
+from pathlib import Path
+
 import numpy as np
 
+from cards import Deck
 from game import FOLD, CALL, RAISE
 from hand_eval import best_hand_score
 from lif import SpikingNetwork
@@ -48,33 +51,86 @@ FEATURES = list(FEATURE_BUDGET)
 STREET_INDEX = {"preflop": 0.0, "flop": 1 / 3, "turn": 2 / 3, "river": 1.0}
 
 
-def preflop_strength(hole):
-    """Crude but monotonic ranking of a two-card starting hand, 0..1."""
+def _score_to_int(score):
+    """Packs a hand score tuple into one sortable integer, so scores can be
+    compared against a precomputed distribution with a binary search."""
 
-    a, b = sorted((c.rank_value for c in hole), reverse=True)
-    suited = hole[0].suit == hole[1].suit
+    packed = int(score[0])
+    padded = list(score[1:]) + [0] * (6 - len(score))
+    for tiebreak in padded[:5]:
+        packed = packed * 15 + int(tiebreak)
+    return packed
 
-    if a == b:                      # pocket pair: 0.55 (twos) .. 1.0 (aces)
-        return 0.55 + 0.45 * (a - 2) / 12
 
-    score = 0.5 * (a - 2) / 12 + 0.2 * (b - 2) / 12
-    if suited:
-        score += 0.08
-    if a - b == 1:                  # connected
-        score += 0.05
-    return float(np.clip(score, 0.0, 0.54))
+class HandStrength:
+    """Converts a hand into the share of random hands it beats.
+
+    A raw category number is a poor measure: two pair is a genuinely good
+    holding but sits at 2 out of 8, and since made hands cluster at the bottom
+    of that range most of the scale goes unused - which both misleads the
+    evaluation and wastes half of the neurons the encoder assigns to card
+    strength. Ranking against an empirical distribution of real hands spreads
+    the values out and gives them a meaning: 0.7 means this beats 70% of what
+    an opponent could be holding.
+    """
+
+    def __init__(self, n_samples=20000, seed=12345, cache_path=None):
+        self.cache_path = cache_path or (Path(__file__).parent / "data" / "hand_cdf.npy")
+        if self.cache_path.exists():
+            self.distribution = np.load(self.cache_path)
+        else:
+            self.distribution = self._sample(n_samples, seed)
+            self.cache_path.parent.mkdir(exist_ok=True)
+            np.save(self.cache_path, self.distribution)
+
+    @staticmethod
+    def _sample(n_samples, seed):
+        packed = np.empty(n_samples, dtype=np.int64)
+        for i in range(n_samples):
+            deck = Deck(seed=seed + i)
+            packed[i] = _score_to_int(best_hand_score(deck.deal(2) + deck.deal(5)))
+        packed.sort()
+        return packed
+
+    def postflop(self, hole, community):
+        rank = np.searchsorted(self.distribution, _score_to_int(
+            best_hand_score(hole + community)))
+        return float(rank / len(self.distribution))
+
+    @staticmethod
+    def preflop(hole):
+        """Two cards, before any board. Scaled to the same meaning as the
+        postflop measure: roughly the share of random holdings it beats, which
+        for real starting hands spans about 0.35 (seven-deuce) to 0.85 (aces)."""
+
+        high, low = sorted((c.rank_value for c in hole), reverse=True)
+        suited = hole[0].suit == hole[1].suit
+
+        if high == low:
+            raw = 0.62 + 0.38 * (high - 2) / 12
+        else:
+            raw = 0.30 * (high - 2) / 12 + 0.12 * (low - 2) / 12
+            if suited:
+                raw += 0.05
+            if high - low == 1:
+                raw += 0.03
+            raw += 0.30
+        return float(np.clip(raw, 0.0, 1.0))
+
+    def __call__(self, hole, community):
+        if len(community) < 3:
+            return self.preflop(hole)
+        return self.postflop(hole, community)
+
+
+_strength = None
 
 
 def hand_strength(hole, community):
-    """0..1 estimate of how good the hand is right now."""
-
-    if len(community) < 3:
-        return preflop_strength(hole)
-
-    score = best_hand_score(hole + community)
-    category = score[0]                      # 0 high card .. 8 straight flush
-    kicker = (score[1] - 2) / 12 if len(score) > 1 else 0.0
-    return float(np.clip((category + kicker) / 9.0, 0.0, 1.0))
+    global _strength
+    if _strength is None:
+        _strength = HandStrength()
+    return _strength(hole, community)
 
 
 def features(obs):
@@ -102,17 +158,37 @@ class OdourEncoder:
     the level the circuit was calibrated against.
     """
 
-    def __init__(self, circuit, n_neurons, budget=None, strength=1.0):
+    def __init__(self, circuit, n_neurons, budget=None, strength=1.0,
+                 slots_per_active=2.5):
         self.olfactory = circuit.indices_of("olfactory")
         self.n_neurons = n_neurons
         self.budget = budget or FEATURE_BUDGET
         self.strength = strength
 
-        # each feature owns a slice of olfactory neurons proportional to its budget
+        # A band is divided into a small number of slots rather than being used
+        # neuron by neuron, and this resolution is what decides whether the fly
+        # can generalise at all.
+        #
+        # With one slot per neuron, a band of ~900 neurons and 24 active ones
+        # means any change in the feature larger than about 2.6% selects a
+        # completely disjoint set: hand strength 0.1 and 0.2 then look exactly
+        # as different as 0.1 and 0.9, so "a strong hand" can never form as a
+        # category and every value has to be memorised on its own.
+        #
+        # Keeping only ~2.5 slots per active neuron makes the active set span a
+        # useful fraction of the range, so nearby values share most of their
+        # neurons and distant ones share none - a tuning curve, which is what
+        # sensory neurons actually have.
         shares = np.array([self.budget[name] for name in FEATURES], dtype=float)
         edges = np.cumsum(shares / shares.sum() * len(self.olfactory)).astype(int)
-        self.bands = np.split(self.olfactory, edges[:-1])
-        self.positions = [np.linspace(0.0, 1.0, len(band)) for band in self.bands]
+        bands = np.split(self.olfactory, edges[:-1])
+
+        self.bands, self.positions = [], []
+        for band, name in zip(bands, FEATURES):
+            n_slots = max(int(self.budget[name] * slots_per_active), self.budget[name] + 1)
+            chosen = np.linspace(0, len(band) - 1, min(n_slots, len(band))).astype(int)
+            self.bands.append(band[chosen])
+            self.positions.append(np.linspace(0.0, 1.0, len(chosen)))
 
     def __call__(self, feature_values, n_agents=1):
         current = np.zeros((self.n_neurons, n_agents), dtype=np.float32)
@@ -131,11 +207,14 @@ class Fly:
         self.circuit = circuit
         self.steps = steps
         self.name = name
-        self.net = SpikingNetwork(circuit.weights)
+        # each fly owns its synapses - flies that learn must diverge from
+        # each other rather than share one brain
+        self.net = SpikingNetwork(circuit.weights.copy())
         self.encoder = OdourEncoder(circuit, self.net.n_neurons)
         self.pools = {action: circuit.indices_of_nt("MBON", nt)
                       for action, nt in ACTION_POOLS.items()}
         self.last_votes = None
+        self.last_counts = None
         self.baseline = {action: (0.0, 1.0) for action in self.pools}
         if calibrate:
             self._calibrate_baseline()
@@ -166,6 +245,10 @@ class Fly:
     def _pool_rates(self, current):
         self.net.reset()
         counts = self.net.run(current, steps=self.steps)[:, 0]
+        # kept so a learning rule can see which cells were active when the
+        # decision was made - the synapses it may later modify are exactly
+        # the ones leaving these cells
+        self.last_counts = counts
         return {action: float(counts[idx].mean()) if len(idx) else 0.0
                 for action, idx in self.pools.items()}
 
