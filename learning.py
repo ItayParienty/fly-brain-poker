@@ -76,10 +76,23 @@ class LearningFly:
     """Wraps a Fly so that the outcome of each hand reshapes its synapses."""
 
     def __init__(self, fly, learning_rate=0.02, floor=0.05, recovery=0.01,
-                 trace_decay=0.8, reward_scale=10.0):
+                 trace_decay=0.8, reward_scale=10.0, expectation_rate=0.05):
         self.fly = fly
         self.learning_rate = learning_rate
         self.reward_scale = reward_scale  # outcome size that means "full dopamine"
+
+        # Dopamine reports the outcome relative to what was expected, not the
+        # raw outcome. This matters in any game you mostly lose: blackjack is
+        # lost on 48% of hands even when played perfectly, so a rule that
+        # punishes whatever was done on every loss punishes whichever action
+        # is used most, correct or not - and flips between them instead of
+        # converging. Scoring the outcome against a running average of recent
+        # outcomes turns a routine loss into a near-zero event and a win into a
+        # strong signal, which is the reward-prediction-error picture of
+        # dopamine (Schultz 1997) and is also seen in fly DANs (Felsenberg et
+        # al. 2017). expectation_rate=0 recovers the raw-sign rule.
+        self.expectation_rate = expectation_rate
+        self.expected_outcome = 0.0
 
         self.floor = floor  # synapses are weakened, never erased or reversed
 
@@ -121,18 +134,23 @@ class LearningFly:
         """Called once a hand is settled. `chips` is the net result for this
         fly: positive is food, negative is a loss."""
 
-        if not self.pending or chips == 0:
+        if not self.pending:
+            return
+
+        surprise = chips - self.expected_outcome
+        self.expected_outcome += self.expectation_rate * (chips - self.expected_outcome)
+        if surprise == 0:
             self.pending.clear()
             return
 
-        # a bigger swing is a stronger dopamine signal, but with a ceiling
-        magnitude = min(abs(chips) / self.reward_scale, 1.0)
+        # a bigger surprise is a stronger dopamine signal, but with a ceiling
+        magnitude = min(abs(surprise) / self.reward_scale, 1.0)
         rate = self.learning_rate * magnitude
 
         last = len(self.pending) - 1
         for age, experience in enumerate(self.pending):
             tag = self.trace_decay ** (last - age)
-            if chips < 0:
+            if surprise < 0:
                 targets = [experience.action]
             else:
                 targets = [a for a in self.fly.pools if a != experience.action]

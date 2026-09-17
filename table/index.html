@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>Fly Brain Blackjack</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #0b0d12; --panel: rgba(14, 17, 24, 0.86); --line: #262c3a;
+    --text: #e6e8ee; --muted: #8a92a6; --hit: #ff9a3c; --stand: #5ab4ff;
+    --win: #6fe3a1; --lose: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
+  #scene { position: fixed; inset: 0; }
+  canvas { display: block; }
+
+  #top { position: fixed; top: 0; right: 0; left: 0; display: flex; align-items: center;
+    gap: 16px; padding: 10px 16px; background: linear-gradient(var(--bg), transparent);
+    pointer-events: none; }
+  #top > * { pointer-events: auto; }
+  #title { font-weight: 600; letter-spacing: .3px; }
+  #title small { color: var(--muted); font-weight: 400; margin-inline-start: 8px; }
+  #message { flex: 1; text-align: center; color: var(--text); font-size: 15px; }
+  #round { color: var(--muted); }
+
+  .label { position: fixed; transform: translate(-50%, -100%); pointer-events: none;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 4px 9px; white-space: nowrap; font-size: 12px; text-align: center; }
+  .label .name { font-weight: 600; }
+  .label .chips { color: var(--muted); }
+  .label .chips.pos { color: var(--win); }
+  .label .chips.neg { color: var(--lose); }
+  .label .status { display: block; margin-top: 2px; }
+  .label .status.hit { color: var(--hit); }  .label .status.stand { color: var(--stand); }
+  .label .status.won, .label .status.blackjack { color: var(--win); }
+  .label .status.lost, .label .status.bust { color: var(--lose); }
+  .label .status.thinking, .label .status.waiting { color: #d9c46a; }
+
+  #controls { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 10px; align-items: center; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+  button { background: #1b2130; color: var(--text); border: 1px solid #344058;
+    border-radius: 8px; padding: 8px 16px; font: inherit; cursor: pointer; }
+  button:hover { background: #242c3f; }
+  button:disabled { opacity: .4; cursor: default; }
+  button.hit { border-color: var(--hit); color: var(--hit); }
+  button.stand { border-color: var(--stand); color: var(--stand); }
+  input { background: #0f131c; color: var(--text); border: 1px solid #344058;
+    border-radius: 8px; padding: 8px 10px; font: inherit; width: 140px; }
+  #hint { color: var(--muted); font-size: 12px; }
+
+  #brain { position: fixed; top: 52px; right: 18px; width: 308px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 12px; padding: 10px; }
+  #brain h3 { margin: 0 0 6px; font-size: 13px; font-weight: 600; display: flex;
+    justify-content: space-between; }
+  #brain h3 span { color: var(--muted); font-weight: 400; }
+  #kc { display: block; width: 288px; height: 162px; background: #0d1117; border-radius: 6px; }
+  #votes { display: block; width: 288px; height: 54px; margin-top: 8px; }
+  #brain .foot { display: flex; justify-content: space-between; color: var(--muted);
+    font-size: 11px; margin-top: 4px; }
+  #brain .foot b { color: var(--text); }
+  #brain.hidden { display: none; }
+</style>
+</head>
+<body>
+<div id="scene"></div>
+
+<div id="top">
+  <div id="title">Fly Brain Blackjack <small>FlyWire connectome · mushroom body · LIF</small></div>
+  <div id="message">מתחבר לשולחן...</div>
+  <div id="round"></div>
+</div>
+
+<div id="labels"></div>
+
+<div id="controls">
+  <span id="join-box">
+    <input id="name" placeholder="השם שלך" maxlength="16">
+    <button id="join">שב לשולחן</button>
+  </span>
+  <span id="play-box" style="display:none">
+    <button id="hit" class="hit">HIT</button>
+    <button id="stand" class="stand">STAND</button>
+    <button id="leave">קום</button>
+  </span>
+  <span id="hint">גרור לסובב · גלגלת לזום · לחץ על זבוב כדי לראות את המוח שלו</span>
+</div>
+
+<div id="brain" class="hidden">
+  <h3><span id="brain-who">—</span><span id="brain-what"></span></h3>
+  <canvas id="kc" width="288" height="162"></canvas>
+  <canvas id="votes" width="288" height="54"></canvas>
+  <div class="foot">
+    <span>5,177 תאי קניון · <b id="kc-count">0</b> פעילים</span>
+    <span>צעד <b id="kc-step">0</b>/60</span>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

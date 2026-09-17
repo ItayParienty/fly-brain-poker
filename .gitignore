@@ -7,3 +7,5 @@ venv/
 # not redistributed here (see CITATION.md).
 data/
 *.npz
+
+.claude/

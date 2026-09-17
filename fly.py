@@ -184,12 +184,21 @@ class OdourEncoder:
         edges = np.cumsum(shares / shares.sum() * len(self.olfactory)).astype(int)
         bands = np.split(self.olfactory, edges[:-1])
 
+        # The slot axis is padded by half a window on each side. Without the
+        # padding, the K nearest slots to any value near an edge are simply
+        # the K slots at that edge - so hand totals 18, 19, 20 and 21 all
+        # selected the identical set and the fly could not tell them apart,
+        # which is exactly the region where it kept hitting.
         self.bands, self.positions = [], []
         for band, name in zip(bands, self.features):
-            n_slots = max(int(self.budget[name] * slots_per_active), self.budget[name] + 1)
-            chosen = np.linspace(0, len(band) - 1, min(n_slots, len(band))).astype(int)
+            k = self.budget[name]
+            spacing = 1.0 / (k * slots_per_active)
+            half = k * spacing / 2
+            positions = np.arange(-half, 1.0 + half + spacing / 2, spacing)
+            n_slots = min(len(positions), len(band))
+            chosen = np.linspace(0, len(band) - 1, n_slots).astype(int)
             self.bands.append(band[chosen])
-            self.positions.append(np.linspace(0.0, 1.0, len(chosen)))
+            self.positions.append(np.linspace(-half, 1.0 + half, n_slots))
 
     def __call__(self, feature_values, n_agents=1):
         current = np.zeros((self.n_neurons, n_agents), dtype=np.float32)
@@ -218,6 +227,12 @@ class Fly:
                       for action, nt in (action_pools or ACTION_POOLS).items()}
         self.last_votes = None
         self.last_counts = None
+        # when True, each decision also stores a step-by-step record of which
+        # Kenyon cells fired and how the MBON pools' votes built up over time,
+        # for visualisation. Costs a Python loop per step, so off by default.
+        self.record_trace = False
+        self.last_trace = None
+        self._kc = circuit.indices_of("Kenyon_Cell")
         self.baseline = {action: (0.0, 1.0) for action in self.pools}
         if calibrate:
             self._calibrate_baseline()
@@ -247,7 +262,18 @@ class Fly:
 
     def _pool_rates(self, current):
         self.net.reset()
-        counts = self.net.run(current, steps=self.steps)[:, 0]
+        if self.record_trace:
+            counts = np.zeros(self.net.n_neurons, dtype=np.int32)
+            frames, votes = [], []
+            for _ in range(self.steps):
+                fired = self.net.step(current)[:, 0]
+                counts += fired
+                frames.append(np.flatnonzero(fired[self._kc]).tolist())
+                votes.append({action: float(counts[idx].mean()) if len(idx) else 0.0
+                              for action, idx in self.pools.items()})
+            self.last_trace = {"kc_frames": frames, "votes": votes}
+        else:
+            counts = self.net.run(current, steps=self.steps)[:, 0]
         # kept so a learning rule can see which cells were active when the
         # decision was made - the synapses it may later modify are exactly
         # the ones leaving these cells
