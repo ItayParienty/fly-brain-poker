@@ -163,6 +163,7 @@ class OdourEncoder:
         self.olfactory = circuit.indices_of("olfactory")
         self.n_neurons = n_neurons
         self.budget = budget or FEATURE_BUDGET
+        self.features = list(self.budget)
         self.strength = strength
 
         # A band is divided into a small number of slots rather than being used
@@ -179,12 +180,12 @@ class OdourEncoder:
         # useful fraction of the range, so nearby values share most of their
         # neurons and distant ones share none - a tuning curve, which is what
         # sensory neurons actually have.
-        shares = np.array([self.budget[name] for name in FEATURES], dtype=float)
+        shares = np.array([self.budget[name] for name in self.features], dtype=float)
         edges = np.cumsum(shares / shares.sum() * len(self.olfactory)).astype(int)
         bands = np.split(self.olfactory, edges[:-1])
 
         self.bands, self.positions = [], []
-        for band, name in zip(bands, FEATURES):
+        for band, name in zip(bands, self.features):
             n_slots = max(int(self.budget[name] * slots_per_active), self.budget[name] + 1)
             chosen = np.linspace(0, len(band) - 1, min(n_slots, len(band))).astype(int)
             self.bands.append(band[chosen])
@@ -192,7 +193,7 @@ class OdourEncoder:
 
     def __call__(self, feature_values, n_agents=1):
         current = np.zeros((self.n_neurons, n_agents), dtype=np.float32)
-        for band, positions, name in zip(self.bands, self.positions, FEATURES):
+        for band, positions, name in zip(self.bands, self.positions, self.features):
             distance = np.abs(positions - feature_values[name])
             k = min(self.budget[name], len(band))
             nearest = np.argpartition(distance, k - 1)[:k]
@@ -203,16 +204,18 @@ class OdourEncoder:
 class Fly:
     """One fly, playing poker with its own copy of the mushroom body."""
 
-    def __init__(self, circuit, steps=60, name="fly", calibrate=True):
+    def __init__(self, circuit, steps=60, name="fly", calibrate=True,
+                 action_pools=None, featurize=None, budget=None):
         self.circuit = circuit
         self.steps = steps
         self.name = name
+        self.featurize = featurize or features
         # each fly owns its synapses - flies that learn must diverge from
         # each other rather than share one brain
         self.net = SpikingNetwork(circuit.weights.copy())
-        self.encoder = OdourEncoder(circuit, self.net.n_neurons)
+        self.encoder = OdourEncoder(circuit, self.net.n_neurons, budget=budget)
         self.pools = {action: circuit.indices_of_nt("MBON", nt)
-                      for action, nt in ACTION_POOLS.items()}
+                      for action, nt in (action_pools or ACTION_POOLS).items()}
         self.last_votes = None
         self.last_counts = None
         self.baseline = {action: (0.0, 1.0) for action in self.pools}
@@ -232,7 +235,7 @@ class Fly:
         rng = np.random.default_rng(seed)
         samples = {action: [] for action in self.pools}
         for _ in range(n_samples):
-            values = {name: float(rng.random()) for name in FEATURES}
+            values = {name: float(rng.random()) for name in self.encoder.features}
             rates = self._pool_rates(self.encoder(values))
             for action, rate in rates.items():
                 samples[action].append(rate)
@@ -255,7 +258,7 @@ class Fly:
     def votes(self, obs):
         """How far each action pool is driven above or below its own norm."""
 
-        rates = self._pool_rates(self.encoder(features(obs)))
+        rates = self._pool_rates(self.encoder(self.featurize(obs)))
         return {action: (rate - self.baseline[action][0]) / self.baseline[action][1]
                 for action, rate in rates.items()}
 

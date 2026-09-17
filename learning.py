@@ -76,9 +76,11 @@ class LearningFly:
     """Wraps a Fly so that the outcome of each hand reshapes its synapses."""
 
     def __init__(self, fly, learning_rate=0.02, floor=0.05, recovery=0.01,
-                 trace_decay=0.8):
+                 trace_decay=0.8, reward_scale=10.0):
         self.fly = fly
         self.learning_rate = learning_rate
+        self.reward_scale = reward_scale  # outcome size that means "full dopamine"
+
         self.floor = floor  # synapses are weakened, never erased or reversed
 
         # Depression-only learning saturates: every hand weakens something and
@@ -124,7 +126,7 @@ class LearningFly:
             return
 
         # a bigger swing is a stronger dopamine signal, but with a ceiling
-        magnitude = min(abs(chips) / 10.0, 1.0)
+        magnitude = min(abs(chips) / self.reward_scale, 1.0)
         rate = self.learning_rate * magnitude
 
         last = len(self.pending) - 1
