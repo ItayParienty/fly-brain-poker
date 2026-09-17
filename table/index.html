@@ -4,102 +4,144 @@
 <meta charset="utf-8">
 <title>Fly Brain Blackjack</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;600;800&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #0b0d12; --panel: rgba(14, 17, 24, 0.86); --line: #262c3a;
-    --text: #e6e8ee; --muted: #8a92a6; --hit: #ff9a3c; --stand: #5ab4ff;
-    --win: #6fe3a1; --lose: #ff6b6b;
+    --bg: #07080c; --glass: rgba(12, 14, 22, 0.62); --glass-line: rgba(255, 255, 255, 0.08);
+    --text: #eef0f5; --muted: #8b93a7; --gold: #e2c56b;
+    --hit: #ff9d47; --stand: #63b8ff; --win: #6ff0a8; --lose: #ff6d7a; --think: #ffe084;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
-    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
+    font-family: "Heebo", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; font-size: 14px;
+    overflow: hidden; }
   #scene { position: fixed; inset: 0; }
   canvas { display: block; }
 
-  #top { position: fixed; top: 0; right: 0; left: 0; display: flex; align-items: center;
-    gap: 16px; padding: 10px 16px; background: linear-gradient(var(--bg), transparent);
-    pointer-events: none; }
-  #top > * { pointer-events: auto; }
-  #title { font-weight: 600; letter-spacing: .3px; }
-  #title small { color: var(--muted); font-weight: 400; margin-inline-start: 8px; }
-  #message { flex: 1; text-align: center; color: var(--text); font-size: 15px; }
-  #round { color: var(--muted); }
+  .glass { background: var(--glass); border: 1px solid var(--glass-line); border-radius: 14px;
+    backdrop-filter: blur(14px) saturate(140%); -webkit-backdrop-filter: blur(14px) saturate(140%);
+    box-shadow: 0 10px 40px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.05); }
 
-  .label { position: fixed; transform: translate(-50%, -100%); pointer-events: none;
-    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
-    padding: 4px 9px; white-space: nowrap; font-size: 12px; text-align: center; }
-  .label .name { font-weight: 600; }
-  .label .chips { color: var(--muted); }
-  .label .chips.pos { color: var(--win); }
-  .label .chips.neg { color: var(--lose); }
-  .label .status { display: block; margin-top: 2px; }
-  .label .status.hit { color: var(--hit); }  .label .status.stand { color: var(--stand); }
+  #top { position: fixed; top: 14px; right: 16px; left: 16px; display: flex; align-items: center;
+    gap: 14px; pointer-events: none; }
+  #top > * { pointer-events: auto; }
+  #title { padding: 8px 14px; font-weight: 800; letter-spacing: .2px; font-size: 15px; }
+  #title small { color: var(--muted); font-weight: 300; margin-inline-start: 10px; font-size: 12px; }
+  #title .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--win);
+    margin-inline-end: 8px; box-shadow: 0 0 10px var(--win); vertical-align: middle; }
+  #message { flex: 1; text-align: center; font-size: 17px; font-weight: 600; text-shadow: 0 2px 12px rgba(0,0,0,.8);
+    transition: opacity .25s, transform .25s; }
+  #message.flash { animation: pop .5s ease; }
+  @keyframes pop { 0% { transform: scale(.94); opacity: .3; } 60% { transform: scale(1.04); } 100% { transform: scale(1); opacity: 1; } }
+  #round { padding: 8px 14px; color: var(--muted); font-weight: 300; }
+  #round b { color: var(--gold); font-weight: 600; }
+
+  .label { position: fixed; transform: translate(-50%, -100%); pointer-events: none; padding: 6px 11px;
+    white-space: nowrap; font-size: 12.5px; text-align: center; transition: opacity .2s; min-width: 92px; }
+  .label .name { font-weight: 800; letter-spacing: .2px; }
+  .label .chips { color: var(--muted); font-weight: 300; margin-inline-start: 5px; }
+  .label .chips.pos { color: var(--win); } .label .chips.neg { color: var(--lose); }
+  .label .status { display: block; margin-top: 2px; font-weight: 600; font-size: 12px; letter-spacing: .3px; }
+  .label .status.hit { color: var(--hit); } .label .status.stand { color: var(--stand); }
   .label .status.won, .label .status.blackjack { color: var(--win); }
   .label .status.lost, .label .status.bust { color: var(--lose); }
-  .label .status.thinking, .label .status.waiting { color: #d9c46a; }
+  .label .status.thinking, .label .status.waiting { color: var(--think); }
+  .label .total { display: inline-block; margin-inline-start: 6px; padding: 0 6px; border-radius: 6px;
+    background: rgba(255,255,255,.08); color: var(--text); font-weight: 600; }
+  .label.me { border-color: rgba(226,197,107,.45); box-shadow: 0 0 0 1px rgba(226,197,107,.15), 0 10px 40px rgba(0,0,0,.45); }
 
-  #controls { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
-    display: flex; gap: 10px; align-items: center; background: var(--panel);
-    border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
-  button { background: #1b2130; color: var(--text); border: 1px solid #344058;
-    border-radius: 8px; padding: 8px 16px; font: inherit; cursor: pointer; }
-  button:hover { background: #242c3f; }
-  button:disabled { opacity: .4; cursor: default; }
+  #controls { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px;
+    align-items: center; padding: 10px 12px; }
+  button { background: rgba(255,255,255,.06); color: var(--text); border: 1px solid rgba(255,255,255,.12);
+    border-radius: 10px; padding: 9px 18px; font: inherit; font-weight: 600; cursor: pointer;
+    transition: transform .12s, background .15s, box-shadow .15s; }
+  button:hover { background: rgba(255,255,255,.11); transform: translateY(-1px); }
+  button:active { transform: translateY(0); }
+  button:disabled { opacity: .35; cursor: default; transform: none; }
   button.hit { border-color: var(--hit); color: var(--hit); }
+  button.hit:not(:disabled) { box-shadow: 0 0 18px rgba(255,157,71,.25); }
   button.stand { border-color: var(--stand); color: var(--stand); }
-  input { background: #0f131c; color: var(--text); border: 1px solid #344058;
-    border-radius: 8px; padding: 8px 10px; font: inherit; width: 140px; }
-  #hint { color: var(--muted); font-size: 12px; }
+  button.stand:not(:disabled) { box-shadow: 0 0 18px rgba(99,184,255,.25); }
+  button.primary { background: linear-gradient(135deg, #e2c56b, #b8932f); color: #1a1508; border: none; }
+  button.primary:hover { background: linear-gradient(135deg, #f0d47c, #c9a43c); }
+  input { background: rgba(0,0,0,.35); color: var(--text); border: 1px solid rgba(255,255,255,.12);
+    border-radius: 10px; padding: 9px 12px; font: inherit; width: 150px; }
+  input:focus { outline: none; border-color: var(--gold); }
+  #hint { color: var(--muted); font-size: 12px; font-weight: 300; }
+  kbd { background: rgba(255,255,255,.1); border-radius: 4px; padding: 0 5px; font-family: inherit; font-size: 11px; }
 
-  #brain { position: fixed; top: 52px; right: 18px; width: 308px; background: var(--panel);
-    border: 1px solid var(--line); border-radius: 12px; padding: 10px; }
-  #brain h3 { margin: 0 0 6px; font-size: 13px; font-weight: 600; display: flex;
-    justify-content: space-between; }
-  #brain h3 span { color: var(--muted); font-weight: 400; }
-  #kc { display: block; width: 288px; height: 162px; background: #0d1117; border-radius: 6px; }
-  #votes { display: block; width: 288px; height: 54px; margin-top: 8px; }
-  #brain .foot { display: flex; justify-content: space-between; color: var(--muted);
-    font-size: 11px; margin-top: 4px; }
-  #brain .foot b { color: var(--text); }
-  #brain.hidden { display: none; }
+  #brain { position: fixed; bottom: 18px; left: 16px; width: 318px; padding: 12px; transition: opacity .3s; }
+  #brain.hidden { opacity: 0; pointer-events: none; }
+  #brain h3 { margin: 0 0 8px; font-size: 13px; font-weight: 800; display: flex; justify-content: space-between;
+    align-items: baseline; }
+  #brain h3 span { color: var(--muted); font-weight: 300; }
+  #brain h3 .pin { color: var(--gold); font-size: 11px; font-weight: 600; }
+  #kc { display: block; width: 294px; height: 165px; background: #070a11; border-radius: 8px; }
+  #votes { display: block; width: 294px; height: 58px; margin-top: 8px; }
+  #brain .foot { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px;
+    margin-top: 6px; font-weight: 300; }
+  #brain .foot b { color: var(--text); font-weight: 600; }
+  #brain .legend { font-size: 11px; color: var(--muted); margin-top: 6px; line-height: 1.5; font-weight: 300; }
+  #brain .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-inline-end: 4px;
+    vertical-align: middle; background: #5adcff; box-shadow: 0 0 6px #5adcff; }
+
+  #toast { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) scale(.9); padding: 18px 34px;
+    font-size: 28px; font-weight: 800; letter-spacing: .5px; opacity: 0; pointer-events: none;
+    transition: opacity .25s, transform .25s; text-shadow: 0 4px 20px rgba(0,0,0,.6); }
+  #toast.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  #toast.win { color: var(--win); } #toast.lose { color: var(--lose); } #toast.push { color: var(--muted); }
+
+  #vignette { position: fixed; inset: 0; pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.55) 100%); }
 </style>
 </head>
 <body>
 <div id="scene"></div>
+<div id="vignette"></div>
 
 <div id="top">
-  <div id="title">Fly Brain Blackjack <small>FlyWire connectome · mushroom body · LIF</small></div>
+  <div id="title" class="glass"><span class="dot"></span>Fly Brain Blackjack<small>FlyWire · mushroom body · 8,574 neurons</small></div>
   <div id="message">מתחבר לשולחן...</div>
-  <div id="round"></div>
+  <div id="round" class="glass"></div>
 </div>
 
 <div id="labels"></div>
+<div id="toast"></div>
 
-<div id="controls">
+<div id="controls" class="glass">
   <span id="join-box">
     <input id="name" placeholder="השם שלך" maxlength="16">
-    <button id="join">שב לשולחן</button>
+    <button id="join" class="primary">שב לשולחן</button>
   </span>
   <span id="play-box" style="display:none">
-    <button id="hit" class="hit">HIT</button>
-    <button id="stand" class="stand">STAND</button>
+    <button id="hit" class="hit">HIT <kbd>H</kbd></button>
+    <button id="stand" class="stand">STAND <kbd>S</kbd></button>
     <button id="leave">קום</button>
   </span>
   <span id="hint">גרור לסובב · גלגלת לזום · לחץ על זבוב כדי לראות את המוח שלו</span>
 </div>
 
-<div id="brain" class="hidden">
+<div id="brain" class="glass hidden">
   <h3><span id="brain-who">—</span><span id="brain-what"></span></h3>
-  <canvas id="kc" width="288" height="162"></canvas>
-  <canvas id="votes" width="288" height="54"></canvas>
+  <canvas id="kc" width="294" height="165"></canvas>
+  <canvas id="votes" width="294" height="58"></canvas>
   <div class="foot">
     <span>5,177 תאי קניון · <b id="kc-count">0</b> פעילים</span>
     <span>צעד <b id="kc-step">0</b>/60</span>
   </div>
+  <div class="legend"><i></i>כל נקודה = תא קניון אמיתי מהקונקטום. הדפוס הדליל הוא "טביעת האצבע" של המצב; ההצבעה נבנית מקצב הירי של ה-MBON-ים.</div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/GammaCorrectionShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
