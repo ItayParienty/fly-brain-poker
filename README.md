@@ -24,9 +24,10 @@ behaviour.
 **But the policy is not knowledge.** In poker the innate circuit raises 19.5%
 *more* often with weak hands than strong ones — a bluffing habit that happens
 to beat a tight opponent (+0.56 chips/hand) because bluffs work on a player
-who folds. In blackjack it agrees with basic strategy on 66% of
+who folds. In blackjack it agrees with basic strategy on 68% of
 frequency-weighted decisions and still hits a hard 18 against most dealer
-cards. Which way the bias points is an accident of which olfactory neurons
+cards. (A player on 21 is not offered a card — table rule, as in a casino.
+Asked, the fly sometimes took one.) Which way the bias points is an accident of which olfactory neurons
 the encoder assigned to card strength; only its stability is a property of
 the wiring.
 
@@ -38,12 +39,12 @@ sign — the same perturbation of the synapses, carrying no information.
 |---|---|---|---|
 | Poker, discrimination | −19.5% | −17.0% ±0.2 | −17.0% ±0.5 |
 | Poker, chips/hand | +0.558 | +0.404 | +0.379 |
-| Blackjack, agreement with basic strategy | 66.1% | 58.5% ±0.1 | 62.8% ±1.6 |
-| Blackjack, hits on hard 17–21 | 33.4% | 55.4% ±1.2 | 39.2% ±1.6 |
-| Blackjack, return/hand | −0.313 | −0.525 ±0.006 | −0.372 ±0.005 |
+| Blackjack, agreement with basic strategy | 67.7% | 58.4% ±0.2 | 60.8% ±0.1 |
+| Blackjack, hits on hard 17–20 | 29.2% | 57.2% ±1.3 | 46.0% ±0.5 |
+| Blackjack, return/hand | −0.234 | −0.409 ±0.004 | −0.330 ±0.007 |
 
 In poker the reward's sign makes no difference at all. In blackjack it does —
-real reward beats random-sign reward on every measure, by 30× the run-to-run
+real reward beats random-sign reward on every measure, by 10× the run-to-run
 spread, so the signal carries information — but plasticity as a whole still
 leaves the fly worse than it started, and at learning rates low enough not
 to damage the innate policy it stops moving at all. The rule disturbs the
@@ -85,7 +86,7 @@ neurons at that end, so hand strengths above ~0.8 — and blackjack totals 18
 through 21 — all drove the identical set of neurons and were
 indistinguishable to the circuit. Fixing it (padding the slot axis by half a
 window, `fly.py`) flipped the poker bias to −19.5% and lifted the untrained
-blackjack fly from 59% to 66% agreement. The stability-versus-noise contrast
+blackjack fly from 59% to 68% agreement. The stability-versus-noise contrast
 survived the fix; the claim about what the bias meant did not. Both the
 original numbers and the corrected ones are in the commit history.
 
