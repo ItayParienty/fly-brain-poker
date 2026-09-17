@@ -200,7 +200,7 @@ class Table:
             self.save_weights()
 
     def _fly_turn(self, seat, deck, dealer_up):
-        while True:
+        while seat.total < 21:
             with self.lock:
                 seat.status, self.phase = "thinking", "fly_turn"
                 self.message = f"{seat.name} חושב על {seat.total}..."
@@ -235,7 +235,7 @@ class Table:
                 return
 
     def _human_turn(self, seat, deck):
-        while True:
+        while seat.total < 21:
             with self.lock:
                 seat.status, self.phase = "waiting", "human_turn"
                 self.message = f"{seat.name}, תורך ({seat.total})"

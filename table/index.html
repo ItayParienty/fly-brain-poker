@@ -30,15 +30,16 @@
   #title small { color: var(--muted); font-weight: 300; margin-inline-start: 10px; font-size: 12px; }
   #title .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--win);
     margin-inline-end: 8px; box-shadow: 0 0 10px var(--win); vertical-align: middle; }
-  #message { flex: 1; text-align: center; font-size: 17px; font-weight: 600; text-shadow: 0 2px 12px rgba(0,0,0,.8);
-    transition: opacity .25s, transform .25s; }
+  #message { flex: 1; min-width: 0; text-align: center; font-size: 17px; font-weight: 600; text-shadow: 0 2px 12px rgba(0,0,0,.8);
+    transition: opacity .25s, transform .25s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #message.flash { animation: pop .5s ease; }
   @keyframes pop { 0% { transform: scale(.94); opacity: .3; } 60% { transform: scale(1.04); } 100% { transform: scale(1); opacity: 1; } }
   #round { padding: 8px 14px; color: var(--muted); font-weight: 300; }
   #round b { color: var(--gold); font-weight: 600; }
 
   .label { position: fixed; transform: translate(-50%, -100%); pointer-events: none; padding: 6px 11px;
-    white-space: nowrap; font-size: 12.5px; text-align: center; transition: opacity .2s; min-width: 92px; }
+    white-space: nowrap; font-size: 12.5px; text-align: center; transition: opacity .2s; min-width: 92px; max-width: 46vw;
+    overflow: hidden; text-overflow: ellipsis; }
   .label .name { font-weight: 800; letter-spacing: .2px; }
   .label .chips { color: var(--muted); font-weight: 300; margin-inline-start: 5px; }
   .label .chips.pos { color: var(--win); } .label .chips.neg { color: var(--lose); }
@@ -52,7 +53,7 @@
   .label.me { border-color: rgba(226,197,107,.45); box-shadow: 0 0 0 1px rgba(226,197,107,.15), 0 10px 40px rgba(0,0,0,.45); }
 
   #controls { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column;
-    gap: 10px; align-items: center; padding: 14px 18px; min-width: 380px; }
+    gap: 10px; align-items: center; padding: 14px 18px; min-width: 380px; max-width: calc(100vw - 32px); }
   #status { font-size: 15px; font-weight: 600; color: var(--muted); display: flex; align-items: center; gap: 8px; }
   #status.turn { color: var(--think); font-size: 17px; }
   #status .pulse { width: 10px; height: 10px; border-radius: 50%; background: var(--think);
@@ -92,7 +93,9 @@
   #hint { color: var(--muted); font-size: 12px; font-weight: 300; }
   kbd { background: rgba(255,255,255,.1); border-radius: 4px; padding: 0 5px; font-family: inherit; font-size: 11px; }
 
-  #brain { position: fixed; bottom: 18px; left: 16px; width: 318px; padding: 12px; transition: opacity .3s; }
+  #brain { position: fixed; bottom: 18px; left: 16px; width: 318px; max-width: calc(100vw - 32px); padding: 12px; transition: opacity .3s; }
+  @media (max-height: 640px) { #brain .legend { display: none; } }
+  @media (max-width: 900px) { #brain { display: none; } #title small { display: none; } }
   #brain.hidden { opacity: 0; pointer-events: none; }
   #brain h3 { margin: 0 0 8px; font-size: 13px; font-weight: 800; display: flex; justify-content: space-between;
     align-items: baseline; }

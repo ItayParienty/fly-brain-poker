@@ -72,6 +72,10 @@ def play_hand(player, seed=None, log=None):
         return 0.0 if dealer_total == 21 else 1.5
 
     while True:
+        # a player holding 21 is not offered a card - table rule, as in a
+        # casino. Without it the fly is asked, and it sometimes says yes.
+        if total >= 21:
+            break
         action = player.act(Observation(total, soft, dealer_up))
         if log is not None:
             log.append(f"  {action} on {total}{' soft' if soft else ''}")

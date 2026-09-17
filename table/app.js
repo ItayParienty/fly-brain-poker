@@ -53,7 +53,7 @@
   const controls = new THREE.OrbitControls(camera, renderer.domElement);
   controls.target.set(0, 0.25, 0);
   controls.enableDamping = true; controls.dampingFactor = 0.06;
-  controls.maxPolarAngle = Math.PI * 0.47; controls.minPolarAngle = Math.PI * 0.12;
+  controls.maxPolarAngle = Math.PI * 0.47; controls.minPolarAngle = Math.PI * 0.02;
   controls.minDistance = 3.2; controls.maxDistance = 11;
   controls.autoRotate = true; controls.autoRotateSpeed = 0.35;
   let lastInteraction = 0;
@@ -63,11 +63,12 @@
   // camera follow: a view is a (position, target) pair the camera glides
   // towards whenever the viewer has not touched the controls for a while
   const OVERVIEW = { pos: new THREE.Vector3(0.6, 4.4, 6.9), target: new THREE.Vector3(0, 0.25, 0) };
-  const DEALER_VIEW = { pos: new THREE.Vector3(0, 3.3, 2.4), target: new THREE.Vector3(0, 0.3, -1.6) };
+  // the dealer's turn is watched from straight above, the whole table in frame
+  const DEALER_VIEW = { pos: new THREE.Vector3(0, 8.2, 0.9), target: new THREE.Vector3(0, 0, -0.2) };
   let follow = true, view = OVERVIEW, viewKey = "overview";
   function seatView(angle) {
-    return { pos: new THREE.Vector3(Math.sin(angle) * 5.4, 3.1, Math.cos(angle) * 5.4),
-             target: new THREE.Vector3(Math.sin(angle) * 0.7, 0.2, Math.cos(angle) * 0.7) };
+    return { pos: new THREE.Vector3(Math.sin(angle) * 5.9, 3.7, Math.cos(angle) * 5.9),
+             target: new THREE.Vector3(Math.sin(angle) * 0.4, 0.1, Math.cos(angle) * 0.4) };
   }
   function setView(key, v) { if (viewKey !== key) { viewKey = key; view = v; } }
   const camEl = document.getElementById("cam");
@@ -331,7 +332,7 @@
         const to = this.slot(i, codes.length), rz = (i - (codes.length - 1) / 2) * -0.05;
         const from = card.position.clone(), faceUp = codes[i] !== "??";
         tween(560, k => {
-          card.position.lerpVectors(from, to, k); card.position.y += Math.sin(k * Math.PI) * 0.8;
+          card.position.lerpVectors(from, to, k); card.position.y = Math.max(0.02, card.position.y + Math.sin(k * Math.PI) * 0.6);
           card.rotation.z = 0.6 + (rz - 0.6) * k;
           if (faceUp) card.userData.flip.rotation.y = Math.PI * (1 - Math.min(1, k * 1.25));
         }, { ease: easeInOut, delay: (i - firstNew) * 120, done: () => { card.userData.arriving = false; } });
@@ -655,8 +656,9 @@
     const dealerActive = s.phase === "dealer";
     dealer.ring.userData.on = dealerActive;
     dealer.label.classList.toggle("active", dealerActive);
-    if (dealerActive) setView("dealer", DEALER_VIEW);
-    else if (s.phase === "dealing" || s.phase === "settle" || s.phase === "starting") setView("overview", OVERVIEW);
+    // overhead for the dealer's turn and the payout, back to the room for the deal
+    if (dealerActive || s.phase === "settle") setView("dealer", DEALER_VIEW);
+    else if (s.phase === "dealing" || s.phase === "starting") setView("overview", OVERVIEW);
 
     s.seats.forEach((ss, i) => {
       const seat = seats[i]; if (!seat) return;
@@ -758,18 +760,35 @@
 
   // ---------- render loop -----------------------------------------------
   const tmp = new THREE.Vector3();
+  const controlsEl = document.getElementById("controls");
   function placeLabel(label, pos, lift) {
     tmp.copy(pos); tmp.y += lift; tmp.project(camera);
-    label.style.left = `${(tmp.x + 1) / 2 * innerWidth}px`; label.style.top = `${(1 - tmp.y) / 2 * innerHeight}px`;
-    label.style.opacity = tmp.z < 1 ? "1" : "0";
+    if (tmp.z > 1) { label.style.opacity = "0"; return; }
+    const w = label.offsetWidth || 100, h = label.offsetHeight || 40;
+    let x = (tmp.x + 1) / 2 * innerWidth, y = (1 - tmp.y) / 2 * innerHeight;
+    // stay on screen (the label is anchored at its bottom centre)
+    x = Math.min(Math.max(x, w / 2 + 8), innerWidth - w / 2 - 8);
+    y = Math.min(Math.max(y, h + 60), innerHeight - 8);
+    // stay above the panels rather than under them
+    for (const el of [controlsEl, brainBox]) {
+      if (el.classList.contains("hidden")) continue;
+      const b = el.getBoundingClientRect();
+      if (y > b.top - 4 && x + w / 2 > b.left && x - w / 2 < b.right) y = b.top - 4;
+    }
+    label.style.left = `${x}px`; label.style.top = `${y}px`;
+    label.style.opacity = "1";
   }
+  let lastFrame = performance.now();
   function render() {
     requestAnimationFrame(render);
     const t = clock.getElapsedTime(), now = performance.now();
+    const dt = Math.min(0.1, (now - lastFrame) / 1000); lastFrame = now;
     const idle = now - lastInteraction > 6000;
     if (follow && idle) {
       controls.autoRotate = false;
-      camera.position.lerp(view.pos, 0.035); controls.target.lerp(view.target, 0.035);
+      // frame-rate independent glide: ~90% of the way in a second
+      const k = 1 - Math.exp(-dt * 2.4);
+      camera.position.lerp(view.pos, k); controls.target.lerp(view.target, k);
     } else if (!follow && !controls.autoRotate && now - lastInteraction > 20000) controls.autoRotate = true;
     for (const ring of turnRings) {
       const target = ring.userData.on ? 0.55 + 0.3 * Math.sin(t * 5) : 0;
@@ -777,6 +796,10 @@
       const sc = ring.userData.on ? 1 + 0.04 * Math.sin(t * 5) : 1; ring.scale.set(sc, sc, 1);
     }
     controls.update(); runTweens(now);
+    // the overhead view sits above the lamp; do not look through the shade
+    const aboveLamp = camera.position.y > 5.0;
+    shade.visible = shadeInner.visible = bulb.visible = cord.visible = !aboveLamp;
+    beam.material.opacity = aboveLamp ? 0.012 : 0.045;
     for (const s of seats) if (s.fly) animateFly(s.fly, t);
     animateFly(dealer.fly, t);
     bulb.material.color.setHSL(0.1, 0.5, 0.92 + 0.03 * Math.sin(t * 17));

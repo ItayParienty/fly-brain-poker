@@ -47,9 +47,9 @@ def decision_grid():
     """Every state a player can be asked to act in."""
     states = []
     for dealer in range(2, 12):
-        for total in range(5, 22):
+        for total in range(5, 21):        # 21 is never asked (table rule)
             states.append(Observation(total, False, dealer))
-        for total in range(13, 22):
+        for total in range(13, 21):
             states.append(Observation(total, True, dealer))
     return states
 
@@ -103,7 +103,7 @@ def weighted_agreement(player):
 
 
 def catastrophic_rate(player):
-    """Share of hard 17-21 states, weighted by frequency, where the player
+    """Share of hard 17-20 states, weighted by frequency, where the player
     hits - a decision that busts most of the time and has no upside."""
 
     freq = state_frequency()
@@ -123,8 +123,8 @@ def strategy_table(player):
     dealers = list(range(2, 12))
     header = "        " + " ".join(f"{'A' if d == 11 else d:>2}" for d in dealers)
     lines = [header]
-    for soft, totals, label in [(False, range(21, 4, -1), "hard"),
-                                (True, range(21, 12, -1), "soft")]:
+    for soft, totals, label in [(False, range(20, 4, -1), "hard"),
+                                (True, range(20, 12, -1), "soft")]:
         lines.append(f"  {label}")
         for total in totals:
             cells = []
