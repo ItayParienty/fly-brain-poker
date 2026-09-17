@@ -7,8 +7,8 @@ A folding opponent removes that shortcut: bluffing stops paying, and the only
 way left to make money is to put chips in when the cards deserve it.
 """
 
-from fly import hand_strength
-from game import CALL, FOLD, RAISE
+from cards.fly import hand_strength
+from cards.game import CALL, FOLD, RAISE
 
 
 class AlwaysCall:

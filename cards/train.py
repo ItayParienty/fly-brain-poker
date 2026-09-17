@@ -9,11 +9,11 @@ turned out to be sweet.
 
 import numpy as np
 
-from baseline import Recorder, action_distribution, strength_split
-from connectome import load_circuit
-from fly import Fly
-from game import ACTIONS, AlwaysCall, play_hand
-from learning import LearningFly
+from cards.baseline import Recorder, action_distribution, strength_split
+from flybrain.connectome import load_circuit
+from cards.fly import Fly
+from cards.game import ACTIONS, AlwaysCall, play_hand
+from flybrain.learning import LearningFly
 
 
 def evaluate(player, opponent, n_hands=120, seed=9000):
@@ -60,5 +60,5 @@ def train(n_hands=600, learning_rate=0.02, seed=0, eval_every=200):
 
 
 if __name__ == "__main__":
-    import console_utf8  # noqa: F401
+    from flybrain import console_utf8  # noqa: F401
     train()

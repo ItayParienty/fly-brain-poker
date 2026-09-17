@@ -17,8 +17,8 @@ running the circuit with it silenced.
 
 import numpy as np
 
-from connectome import load_circuit
-from lif import SpikingNetwork
+from flybrain.connectome import load_circuit
+from flybrain.lif import SpikingNetwork
 
 STEPS = 60
 
@@ -72,5 +72,5 @@ def main():
 
 
 if __name__ == "__main__":
-    import console_utf8  # noqa: F401
+    from flybrain import console_utf8  # noqa: F401
     main()

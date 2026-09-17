@@ -18,11 +18,11 @@ spread for the learning to count.
 
 import numpy as np
 
-from blackjack import play_hand
-from blackjack_fly import (catastrophic_rate, make_fly, return_per_hand,
+from cards.blackjack import play_hand
+from cards.blackjack_fly import (catastrophic_rate, make_fly, return_per_hand,
                            strategy_table, weighted_agreement)
-from connectome import load_circuit
-from learning import LearningFly
+from flybrain.connectome import load_circuit
+from flybrain.learning import LearningFly
 
 GROUPS = ["frozen", "shuffled", "real"]
 LABELS = {"frozen": "ללא למידה", "shuffled": "תגמול אקראי", "real": "תגמול אמיתי"}
@@ -102,5 +102,5 @@ def main(n_hands=3000, repeats=3, learning_rate=0.01, show_table=True):
 
 
 if __name__ == "__main__":
-    import console_utf8  # noqa: F401
+    from flybrain import console_utf8  # noqa: F401
     main()

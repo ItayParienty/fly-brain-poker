@@ -40,7 +40,7 @@ class Deck:
 
 
 if __name__ == "__main__":
-    import console_utf8  # noqa: F401
+    from flybrain import console_utf8  # noqa: F401
 
     deck = Deck(seed=0)
     print("שני קלפים אישיים לדוגמה:", deck.deal(2))

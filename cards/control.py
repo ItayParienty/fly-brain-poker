@@ -21,13 +21,13 @@ Two things are measured, and they are not the same thing:
 
 import numpy as np
 
-from baseline import Recorder, strength_split
-from connectome import load_circuit
-from fly import Fly
-from game import play_hand
-from learning import LearningFly
-from opponents import AlwaysCall, TightOpponent
-from train import evaluate
+from cards.baseline import Recorder, strength_split
+from flybrain.connectome import load_circuit
+from cards.fly import Fly
+from cards.game import play_hand
+from flybrain.learning import LearningFly
+from cards.opponents import AlwaysCall, TightOpponent
+from cards.train import evaluate
 
 
 def discrimination(log):
@@ -80,5 +80,5 @@ def main(n_hands=600, opponent=None, opponent_name="יריב הדוק"):
 
 
 if __name__ == "__main__":
-    import console_utf8  # noqa: F401
+    from flybrain import console_utf8  # noqa: F401
     main()

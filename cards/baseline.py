@@ -8,9 +8,9 @@ later has to be measured against these numbers.
 
 import numpy as np
 
-from connectome import load_circuit
-from fly import Fly, features
-from game import ACTIONS, AlwaysCall, play_hand
+from flybrain.connectome import load_circuit
+from cards.fly import Fly, features
+from cards.game import ACTIONS, AlwaysCall, play_hand
 
 
 class Recorder:
@@ -73,5 +73,5 @@ def run(n_hands=200, seed=0):
 
 
 if __name__ == "__main__":
-    import console_utf8  # noqa: F401
+    from flybrain import console_utf8  # noqa: F401
     run()

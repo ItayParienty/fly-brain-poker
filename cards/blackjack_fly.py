@@ -20,10 +20,10 @@ decision.
 
 import numpy as np
 
-from blackjack import (ACTIONS, HIT, STAND, BasicStrategyPlayer, Observation,
+from cards.blackjack import (ACTIONS, HIT, STAND, BasicStrategyPlayer, Observation,
                        basic_strategy, play_hand)
-from connectome import load_circuit
-from fly import Fly
+from flybrain.connectome import load_circuit
+from cards.fly import Fly
 
 ACTION_POOLS = {HIT: "ACH", STAND: "GLUT"}
 
@@ -142,7 +142,7 @@ def return_per_hand(player, n_hands=4000, seed=50000):
 
 
 if __name__ == "__main__":
-    import console_utf8  # noqa: F401
+    from flybrain import console_utf8  # noqa: F401
 
     circuit = load_circuit()
     fly = make_fly(circuit)

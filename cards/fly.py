@@ -25,10 +25,10 @@ from pathlib import Path
 
 import numpy as np
 
-from cards import Deck
-from game import FOLD, CALL, RAISE
-from hand_eval import best_hand_score
-from lif import SpikingNetwork
+from cards.deck import Deck
+from cards.game import FOLD, CALL, RAISE
+from cards.hand_eval import best_hand_score
+from flybrain.lif import SpikingNetwork
 
 # MBON transmitter -> poker action. See module docstring.
 ACTION_POOLS = {RAISE: "ACH", FOLD: "GLUT", CALL: "GABA"}
@@ -75,7 +75,7 @@ class HandStrength:
     """
 
     def __init__(self, n_samples=20000, seed=12345, cache_path=None):
-        self.cache_path = cache_path or (Path(__file__).parent / "data" / "hand_cdf.npy")
+        self.cache_path = cache_path or (Path(__file__).resolve().parents[1] / "data" / "hand_cdf.npy")
         if self.cache_path.exists():
             self.distribution = np.load(self.cache_path)
         else:

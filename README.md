@@ -9,7 +9,7 @@ scanned wiring, the plasticity rule is the one the fly already uses, and the
 question is what such a circuit does when what it has to judge is a hand of
 cards instead of a smell.
 
-<p align="center"><em>python table_server.py --learn → http://localhost:8765</em></p>
+<p align="center"><em>python -m cards.table_server --learn → http://localhost:8765</em></p>
 
 ## What was found
 
@@ -18,7 +18,7 @@ Before any learning, the circuit's behaviour under a fixed encoding is
 deterministic and repeatable. Randomising which MBONs drive which action, or
 rewiring the Kenyon cell → MBON connections while keeping their number and
 weights, turns that into a different policy on every seed, with a spread of
-±10–19 points (`innate.py`). The recorded connectivity is what fixes the
+±10–19 points (`cards/innate.py`). The recorded connectivity is what fixes the
 behaviour.
 
 **But the policy is not knowledge.** In poker the innate circuit raises 19.5%
@@ -62,7 +62,7 @@ What the rule then learns is the obvious part. Hitting a hard 20 busts nine
 times in ten and its signature is unmistakable; hard 16 against a 10 loses
 about as often either way, and a rule that updates on single outcomes cannot
 resolve a two-point difference in expectation. The same code passes the
-classic odour-conditioning protocol cleanly (`conditioning.py`: a punished
+classic odour-conditioning protocol cleanly (`cards/conditioning.py`: a punished
 odour loses 23% of its approach drive, a control odour 1%), so this is the
 rule meeting a task it was not built for, not a broken implementation.
 
@@ -85,7 +85,7 @@ nearest to any feature value near the end of its range were simply the *K*
 neurons at that end, so hand strengths above ~0.8 — and blackjack totals 18
 through 21 — all drove the identical set of neurons and were
 indistinguishable to the circuit. Fixing it (padding the slot axis by half a
-window, `fly.py`) flipped the poker bias to −19.5% and lifted the untrained
+window, `cards/fly.py`) flipped the poker bias to −19.5% and lifted the untrained
 blackjack fly from 59% to 68% agreement. The stability-versus-noise contrast
 survived the fix; the claim about what the bias meant did not. Both the
 original numbers and the corrected ones are in the commit history.
@@ -110,7 +110,7 @@ original numbers and the corrected ones are in the commit history.
       APL        2   one giant inhibitory neuron per hemisphere
 ```
 
-`verify_brain.py` checks the three properties any association depends on.
+`flybrain/verify_brain.py` checks the three properties any association depends on.
 These are simulation outputs, not quotations:
 
 | Property | Measured | Expected |
@@ -127,7 +127,7 @@ sparseness, which is the role the literature assigns them.
 
 ## The table
 
-`table_server.py` runs a blackjack table with three flies, a dealer and a
+`cards/table_server.py` runs a blackjack table with three flies, a dealer and a
 seat for you, and serves it to a three.js front end. The flies are built from
 their anatomy — thorax, striped abdomen, compound eyes, antennae, six jointed
 legs, halteres, veined wings — and animated from the game: wings flutter while
@@ -157,26 +157,34 @@ keep learning while they play and their synapses are saved between runs.
 
 ```bash
 pip install -r requirements.txt
-python download_data.py          # ~50 MB from FlyWire, once
+python -m flybrain.download_data      # ~50 MB from FlyWire, once
 
-python table_server.py --learn   # the table, at http://localhost:8765
+python -m cards.table_server --learn  # the table, at http://localhost:8765
 
-python connectome.py             # build the circuit, print its composition
-python verify_brain.py           # sparseness, separation, reliability, APL
-python calibrate.py              # sweep the one free parameter
+python -m flybrain.connectome         # build the circuit, print its composition
+python -m flybrain.verify_brain       # sparseness, separation, reliability, APL
+python -m flybrain.calibrate          # sweep the one free parameter
 
-python innate.py                 # measured wiring vs randomised (poker)
-python experiment.py             # real vs random-sign reward (poker)
-python blackjack_experiment.py   # the same, for blackjack
-python conditioning.py           # classic odour conditioning, as a positive control
+python -m cards.innate                # measured wiring vs randomised (poker)
+python -m cards.experiment            # real vs random-sign reward (poker)
+python -m cards.blackjack_experiment  # the same, for blackjack
+python -m cards.conditioning          # classic odour conditioning, as a positive control
 ```
 
 Smaller pieces, worth reading first:
 
 ```bash
-python demo_neuron.py            # one neuron charging, leaking, firing
-python game.py                   # one scripted heads-up poker hand
-python blackjack.py              # basic strategy vs mimic-the-dealer vs always-stand
+python -m flybrain.demo_neuron        # one neuron charging, leaking, firing
+python -m cards.game                  # one scripted heads-up poker hand
+python -m cards.blackjack             # basic strategy vs mimic-the-dealer vs always-stand
+```
+
+## Layout
+
+```
+flybrain/   the brain: FlyWire download, circuit, spiking simulation, plasticity rule, checks
+cards/      poker, blackjack, and the 3D table
+data/       FlyWire files and caches (not committed)
 ```
 
 ## Data

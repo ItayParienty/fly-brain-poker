@@ -13,8 +13,8 @@ Simplifications, and why:
     time.
 """
 
-from cards import Deck
-from hand_eval import best_hand_score, describe
+from cards.deck import Deck
+from cards.hand_eval import best_hand_score, describe
 
 FOLD, CALL, RAISE = "FOLD", "CALL", "RAISE"
 ACTIONS = [FOLD, CALL, RAISE]
@@ -169,7 +169,7 @@ class AlwaysRaise:
 
 
 if __name__ == "__main__":
-    import console_utf8  # noqa: F401
+    from flybrain import console_utf8  # noqa: F401
 
     log = []
     deltas = play_hand([AlwaysCall(), AlwaysRaise()], seed=7, log=log)

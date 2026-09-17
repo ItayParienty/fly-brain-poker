@@ -6,8 +6,8 @@ which Kenyon cells fired on each timestep and how the HIT and STAND votes
 built up - so the front end can show the circuit deciding, not just the
 result.
 
-    python table_server.py            # then open http://localhost:8765
-    python table_server.py --learn    # flies keep learning while they play
+    python -m cards.table_server            # then open http://localhost:8765
+    python -m cards.table_server --learn    # flies keep learning while they play
 
 Endpoints
     GET  /state                 full table state
@@ -26,15 +26,15 @@ from pathlib import Path
 
 import numpy as np
 
-from blackjack import HIT, STAND, Deck, Observation, card_value, hand_total
-from blackjack_fly import make_fly
-from connectome import load_circuit
-from learning import LearningFly
+from cards.blackjack import HIT, STAND, Deck, Observation, card_value, hand_total
+from cards.blackjack_fly import make_fly
+from flybrain.connectome import load_circuit
+from flybrain.learning import LearningFly
 
 FLY_NAMES = ["Zizi", "Bzzt", "Dorit"]
 PACE = 1.6          # seconds between visible steps
 HUMAN_TIMEOUT = 40  # seconds a human gets to act before standing automatically
-WEIGHTS_DIR = Path(__file__).parent / "data"
+WEIGHTS_DIR = Path(__file__).resolve().parents[1] / "data"
 
 
 class Seat:

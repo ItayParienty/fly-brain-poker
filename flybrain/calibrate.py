@@ -13,8 +13,8 @@ identical); too little and nothing fires at all.
 
 import numpy as np
 
-from connectome import load_circuit
-from lif import SpikingNetwork
+from flybrain.connectome import load_circuit
+from flybrain.lif import SpikingNetwork
 
 TARGET_SPARSITY = (0.05, 0.10)
 
@@ -61,7 +61,7 @@ def measure(circuit, weight_scale, steps=60, n_odours=5, seed=0):
 
 
 if __name__ == "__main__":
-    import console_utf8  # noqa: F401
+    from flybrain import console_utf8  # noqa: F401
 
     circuit = load_circuit(weight_scale=1.0)  # raw synapse counts; the sweep scales them
     print("סורק ערכי weight_scale...\n")

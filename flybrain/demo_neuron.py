@@ -3,9 +3,9 @@
 Run this to build intuition before wiring neurons into a brain.
 """
 
-import console_utf8  # noqa: F401
+from flybrain import console_utf8  # noqa: F401
 
-from neuron import LIFNeuron
+from flybrain.neuron import LIFNeuron
 
 
 def show_trace(input_current, steps=25):

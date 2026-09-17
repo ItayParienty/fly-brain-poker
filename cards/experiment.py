@@ -13,13 +13,13 @@ nothing to do with reading your cards.
 
 import numpy as np
 
-from connectome import load_circuit
-from control import discrimination
-from fly import Fly
-from game import play_hand
-from learning import LearningFly
-from opponents import TightOpponent
-from train import evaluate
+from flybrain.connectome import load_circuit
+from cards.control import discrimination
+from cards.fly import Fly
+from cards.game import play_hand
+from flybrain.learning import LearningFly
+from cards.opponents import TightOpponent
+from cards.train import evaluate
 
 GROUPS = ["frozen", "shuffled", "real"]
 LABELS = {"real": "תגמול אמיתי", "shuffled": "תגמול אקראי", "frozen": "ללא למידה"}
@@ -90,5 +90,5 @@ def main(n_hands=1200, repeats=4, learning_rate=0.002):
 
 
 if __name__ == "__main__":
-    import console_utf8  # noqa: F401
+    from flybrain import console_utf8  # noqa: F401
     main()

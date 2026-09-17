@@ -30,7 +30,7 @@ import numpy as np
 import pandas as pd
 from scipy import sparse
 
-DATA_DIR = Path(__file__).parent / "data"
+DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 CACHE_PATH = DATA_DIR / "circuit_cache.npz"
 
 # Synapse counts converted to membrane current. Determined empirically by
@@ -166,7 +166,7 @@ def load_circuit(weight_scale=DEFAULT_WEIGHT_SCALE, rebuild=False, data_dir=DATA
 
 
 if __name__ == "__main__":
-    import console_utf8  # noqa: F401
+    from flybrain import console_utf8  # noqa: F401
 
     circuit = load_circuit(rebuild=True)
     print(circuit.summary())

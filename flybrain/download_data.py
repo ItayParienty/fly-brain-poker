@@ -13,7 +13,7 @@ import urllib.request
 from pathlib import Path
 
 BASE_URL = "https://storage.googleapis.com/flywire-data/codex/data/fafb/783"
-DATA_DIR = Path(__file__).parent / "data"
+DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 
 FILES = {
     "connections.csv.gz": "neuron-to-neuron connections, synapse counts, neurotransmitters",

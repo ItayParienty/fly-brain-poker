@@ -20,10 +20,10 @@ Nothing about poker is involved here.
 
 import numpy as np
 
-from connectome import load_circuit
-from fly import ACTION_POOLS, Fly
-from game import RAISE
-from learning import Experience, LearningFly
+from flybrain.connectome import load_circuit
+from cards.fly import ACTION_POOLS, Fly
+from cards.game import RAISE
+from flybrain.learning import Experience, LearningFly
 
 
 def make_odour(circuit, n_neurons, rng, n_active=60):
@@ -89,5 +89,5 @@ def main(n_trials=12, learning_rate=0.05, repeats=3):
 
 
 if __name__ == "__main__":
-    import console_utf8  # noqa: F401
+    from flybrain import console_utf8  # noqa: F401
     main()

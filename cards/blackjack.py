@@ -16,7 +16,7 @@ soft 17. A natural pays 3:2.
 the fly; it is the answer key the fly is scored against afterwards.
 """
 
-from cards import Deck
+from cards.deck import Deck
 
 HIT, STAND = "HIT", "STAND"
 ACTIONS = [HIT, STAND]
@@ -148,7 +148,7 @@ def house_edge(player, n_hands=20000, seed=0):
 
 
 if __name__ == "__main__":
-    import console_utf8  # noqa: F401
+    from flybrain import console_utf8  # noqa: F401
 
     log = []
     result = play_hand(BasicStrategyPlayer(), seed=3, log=log)

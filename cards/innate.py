@@ -21,11 +21,11 @@ producing the behaviour.
 
 import numpy as np
 
-from connectome import load_circuit
-from control import discrimination
-from fly import Fly
-from opponents import TightOpponent
-from train import evaluate
+from flybrain.connectome import load_circuit
+from cards.control import discrimination
+from cards.fly import Fly
+from cards.opponents import TightOpponent
+from cards.train import evaluate
 
 
 def shuffle_pools(fly, rng):
@@ -106,5 +106,5 @@ def main(repeats=3):
 
 
 if __name__ == "__main__":
-    import console_utf8  # noqa: F401
+    from flybrain import console_utf8  # noqa: F401
     main()
