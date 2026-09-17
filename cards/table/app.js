@@ -47,7 +47,7 @@
   scene.background = new THREE.Color(0x07080c);
   scene.fog = new THREE.FogExp2(0x07080c, 0.045);
 
-  const camera = new THREE.PerspectiveCamera(46, innerWidth / innerHeight, 0.1, 80);
+  const camera = new THREE.PerspectiveCamera(46, innerWidth / innerHeight, 0.3, 80);
   camera.position.set(0.6, 4.4, 6.9);
 
   const controls = new THREE.OrbitControls(camera, renderer.domElement);
@@ -65,18 +65,12 @@
   const OVERVIEW = { pos: new THREE.Vector3(0.6, 4.4, 6.9), target: new THREE.Vector3(0, 0.25, 0) };
   // the dealer's turn is watched from straight above, the whole table in frame
   const DEALER_VIEW = { pos: new THREE.Vector3(0, 8.2, 0.9), target: new THREE.Vector3(0, 0, -0.2) };
-  let follow = true, view = OVERVIEW, viewKey = "overview";
+  let view = OVERVIEW, viewKey = "overview";
   function seatView(angle) {
     return { pos: new THREE.Vector3(Math.sin(angle) * 5.9, 3.7, Math.cos(angle) * 5.9),
              target: new THREE.Vector3(Math.sin(angle) * 0.4, 0.1, Math.cos(angle) * 0.4) };
   }
   function setView(key, v) { if (viewKey !== key) { viewKey = key; view = v; } }
-  const camEl = document.getElementById("cam");
-  camEl.addEventListener("click", () => {
-    follow = !follow; camEl.classList.toggle("on", follow);
-    camEl.querySelector("b").textContent = follow ? "עוקבת" : "חופשית";
-    if (!follow) controls.autoRotate = true;
-  });
 
   // post-processing: bloom for the eyes, chips and thought bubbles
   const composer = new THREE.EffectComposer(renderer);
@@ -272,26 +266,26 @@
     x.fillStyle = "#e2c56b"; x.font = "800 34px Heebo, sans-serif"; x.textAlign = "center"; x.textBaseline = "middle"; x.fillText("FB", w / 2, h / 2 + 2);
     x.restore();
   }));
-  const cardGeo = new THREE.PlaneGeometry(0.5, 0.7);
-  const cardEdgeGeo = new THREE.BoxGeometry(0.5, 0.7, 0.012);
+  const CARD_THICK = 0.012, CARD_STEP = 0.016;   // cards in a hand stack by more than their thickness
+  const cardGeo = new THREE.BoxGeometry(0.5, 0.7, CARD_THICK);
+  const cardEdgeMat = new THREE.MeshStandardMaterial({ color: 0xf3efe4, roughness: 0.9 });
   function makeCard(code) {
     const g = new THREE.Group();
     const flip = new THREE.Group(); g.add(flip);
-    const body = new THREE.Mesh(cardEdgeGeo, new THREE.MeshStandardMaterial({ color: 0xf3efe4, roughness: 0.9 }));
+    const faceMat = new THREE.MeshStandardMaterial({ map: faceTexture(code === "??" ? "As" : code), roughness: 0.6 });
+    const backMat = new THREE.MeshStandardMaterial({ map: backTexture, roughness: 0.6 });
+    // box material order: +x, -x, +y, -y, +z (face), -z (back)
+    const body = new THREE.Mesh(cardGeo, [cardEdgeMat, cardEdgeMat, cardEdgeMat, cardEdgeMat, faceMat, backMat]);
     body.castShadow = true; flip.add(body);
-    const face = new THREE.Mesh(cardGeo, new THREE.MeshStandardMaterial({ map: faceTexture(code === "??" ? "As" : code), roughness: 0.6 }));
-    face.position.z = 0.0065; flip.add(face);
-    const back = new THREE.Mesh(cardGeo, new THREE.MeshStandardMaterial({ map: backTexture, roughness: 0.6 }));
-    back.position.z = -0.0065; back.rotation.y = Math.PI; flip.add(back);
     g.rotation.x = -Math.PI / 2;
     flip.rotation.y = code === "??" ? Math.PI : 0;
-    g.userData = { code, flip, face };
+    g.userData = { code, flip, face: { material: faceMat } };
     return g;
   }
 
   class Hand {
     constructor(group) { this.group = group; this.cards = []; this.codes = []; }
-    slot(i, n) { return new THREE.Vector3((i - (n - 1) / 2) * 0.32, 0.004 * i, 0); }
+    slot(i, n) { return new THREE.Vector3((i - (n - 1) / 2) * 0.32, CARD_STEP * i, 0); }
     layout() {
       const n = this.cards.length;
       this.cards.forEach((c, i) => {
@@ -309,7 +303,7 @@
         const card = this.cards[1];
         card.userData.face.material.map = faceTexture(codes[1]); card.userData.face.material.needsUpdate = true;
         const flip = card.userData.flip;
-        tween(520, k => { flip.rotation.y = Math.PI * (1 - k); card.position.y = 0.004 + Math.sin(k * Math.PI) * 0.35; }, { ease: easeInOut });
+        tween(520, k => { flip.rotation.y = Math.PI * (1 - k); card.position.y = CARD_STEP + Math.sin(k * Math.PI) * 0.35; }, { ease: easeInOut });
         this.codes = codes.slice(); return;
       }
       if (codes.length < this.codes.length || codes.length === 0) {
@@ -493,7 +487,7 @@
   const seats = SEAT_ANGLES.map((deg, i) => {
     const a = THREE.MathUtils.degToRad(deg);
     const pos = new THREE.Vector3(SEAT_RADIUS * Math.sin(a), 0.24, SEAT_RADIUS * Math.cos(a));
-    const cards = new THREE.Group(); cards.position.set(CARD_RADIUS * Math.sin(a), 0.012, CARD_RADIUS * Math.cos(a)); cards.rotation.y = a; scene.add(cards);
+    const cards = new THREE.Group(); cards.position.set(CARD_RADIUS * Math.sin(a), 0.014, CARD_RADIUS * Math.cos(a)); cards.rotation.y = a; scene.add(cards);
     const chips = new THREE.Group(); chips.position.set(CHIP_RADIUS * Math.sin(a), 0.0, CHIP_RADIUS * Math.cos(a)); chips.rotation.y = a; scene.add(chips);
     const label = document.createElement("div"); label.className = "label glass"; document.getElementById("labels").appendChild(label);
     const ring = makeTurnRing(); ring.position.set(CARD_RADIUS * Math.sin(a), 0.006, CARD_RADIUS * Math.cos(a)); scene.add(ring);
@@ -783,13 +777,13 @@
     requestAnimationFrame(render);
     const t = clock.getElapsedTime(), now = performance.now();
     const dt = Math.min(0.1, (now - lastFrame) / 1000); lastFrame = now;
-    const idle = now - lastInteraction > 6000;
-    if (follow && idle) {
+    // the camera follows the game; dragging it pauses that for a few seconds
+    if (now - lastInteraction > 4000) {
       controls.autoRotate = false;
       // frame-rate independent glide: ~90% of the way in a second
       const k = 1 - Math.exp(-dt * 2.4);
       camera.position.lerp(view.pos, k); controls.target.lerp(view.target, k);
-    } else if (!follow && !controls.autoRotate && now - lastInteraction > 20000) controls.autoRotate = true;
+    }
     for (const ring of turnRings) {
       const target = ring.userData.on ? 0.55 + 0.3 * Math.sin(t * 5) : 0;
       ring.material.opacity += (target - ring.material.opacity) * 0.12;
