@@ -51,8 +51,29 @@
     background: rgba(255,255,255,.08); color: var(--text); font-weight: 600; }
   .label.me { border-color: rgba(226,197,107,.45); box-shadow: 0 0 0 1px rgba(226,197,107,.15), 0 10px 40px rgba(0,0,0,.45); }
 
-  #controls { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px;
-    align-items: center; padding: 10px 12px; }
+  #controls { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column;
+    gap: 10px; align-items: center; padding: 14px 18px; min-width: 380px; }
+  #status { font-size: 15px; font-weight: 600; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+  #status.turn { color: var(--think); font-size: 17px; }
+  #status .pulse { width: 10px; height: 10px; border-radius: 50%; background: var(--think);
+    box-shadow: 0 0 12px var(--think); animation: beat 1s ease-in-out infinite; }
+  @keyframes beat { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.5); opacity: .6; } }
+  .row { display: flex; gap: 10px; align-items: center; }
+  button.big { padding: 14px 30px; font-size: 18px; font-weight: 800; border-radius: 12px; letter-spacing: .4px; }
+  button.hit.big:not(:disabled) { animation: glowH 1.2s ease-in-out infinite; }
+  button.stand.big:not(:disabled) { animation: glowS 1.2s ease-in-out infinite; }
+  @keyframes glowH { 0%, 100% { box-shadow: 0 0 14px rgba(255,157,71,.25); } 50% { box-shadow: 0 0 30px rgba(255,157,71,.65); } }
+  @keyframes glowS { 0%, 100% { box-shadow: 0 0 14px rgba(99,184,255,.25); } 50% { box-shadow: 0 0 30px rgba(99,184,255,.65); } }
+  button.ghost { background: transparent; color: var(--muted); border-color: rgba(255,255,255,.1); }
+  #cam { position: fixed; top: 64px; right: 16px; padding: 8px 12px; font-size: 12px; color: var(--muted); cursor: pointer;
+    display: flex; gap: 8px; align-items: center; user-select: none; }
+  #cam b { color: var(--text); font-weight: 600; }
+  #cam .sw { width: 30px; height: 16px; border-radius: 8px; background: rgba(255,255,255,.12); position: relative; transition: background .2s; }
+  #cam .sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; transition: left .2s; }
+  #cam.on .sw { background: var(--gold); } #cam.on .sw::after { left: 16px; }
+  .label.active { border-color: rgba(255,224,132,.7); box-shadow: 0 0 0 2px rgba(255,224,132,.25), 0 0 30px rgba(255,224,132,.35), 0 10px 40px rgba(0,0,0,.45);
+    transform: translate(-50%, -100%) scale(1.15); }
+  .label.active .name { color: var(--think); }
   button { background: rgba(255,255,255,.06); color: var(--text); border: 1px solid rgba(255,255,255,.12);
     border-radius: 10px; padding: 9px 18px; font: inherit; font-weight: 600; cursor: pointer;
     transition: transform .12s, background .15s, box-shadow .15s; }
@@ -109,17 +130,24 @@
 <div id="labels"></div>
 <div id="toast"></div>
 
+<div id="cam" class="glass on"><span class="sw"></span><span>מצלמה <b>עוקבת</b></span></div>
+
 <div id="controls" class="glass">
-  <span id="join-box">
+  <div id="status">אתה צופה</div>
+  <div class="row" id="join-box">
     <input id="name" placeholder="השם שלך" maxlength="16">
-    <button id="join" class="primary">שב לשולחן</button>
-  </span>
-  <span id="play-box" style="display:none">
-    <button id="hit" class="hit">HIT <kbd>H</kbd></button>
-    <button id="stand" class="stand">STAND <kbd>S</kbd></button>
-    <button id="leave">קום</button>
-  </span>
-  <span id="hint">גרור לסובב · גלגלת לזום · לחץ על זבוב כדי לראות את המוח שלו</span>
+    <button id="join" class="primary big">הצטרף לשולחן</button>
+  </div>
+  <div class="row" id="takeover-box" style="display:none">
+    <input id="name2" placeholder="השם שלך" maxlength="16" oninput="document.getElementById('name').value=this.value">
+    <button id="takeover" class="primary big">שב במקומו</button>
+  </div>
+  <div class="row" id="play-box" style="display:none">
+    <button id="hit" class="hit big">HIT <kbd>H</kbd></button>
+    <button id="stand" class="stand big">STAND <kbd>S</kbd></button>
+    <button id="leave" class="ghost">עזוב שולחן</button>
+  </div>
+  <div id="hint">גרור לסובב · גלגלת לזום · לחץ על זבוב כדי לראות את המוח שלו</div>
 </div>
 
 <div id="brain" class="glass hidden">

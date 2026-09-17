@@ -60,6 +60,23 @@
   renderer.domElement.addEventListener("pointerdown", () => { controls.autoRotate = false; lastInteraction = performance.now(); });
   renderer.domElement.addEventListener("wheel", () => { controls.autoRotate = false; lastInteraction = performance.now(); }, { passive: true });
 
+  // camera follow: a view is a (position, target) pair the camera glides
+  // towards whenever the viewer has not touched the controls for a while
+  const OVERVIEW = { pos: new THREE.Vector3(0.6, 4.4, 6.9), target: new THREE.Vector3(0, 0.25, 0) };
+  const DEALER_VIEW = { pos: new THREE.Vector3(0, 3.3, 2.4), target: new THREE.Vector3(0, 0.3, -1.6) };
+  let follow = true, view = OVERVIEW, viewKey = "overview";
+  function seatView(angle) {
+    return { pos: new THREE.Vector3(Math.sin(angle) * 5.4, 3.1, Math.cos(angle) * 5.4),
+             target: new THREE.Vector3(Math.sin(angle) * 0.7, 0.2, Math.cos(angle) * 0.7) };
+  }
+  function setView(key, v) { if (viewKey !== key) { viewKey = key; view = v; } }
+  const camEl = document.getElementById("cam");
+  camEl.addEventListener("click", () => {
+    follow = !follow; camEl.classList.toggle("on", follow);
+    camEl.querySelector("b").textContent = follow ? "עוקבת" : "חופשית";
+    if (!follow) controls.autoRotate = true;
+  });
+
   // post-processing: bloom for the eyes, chips and thought bubbles
   const composer = new THREE.EffectComposer(renderer);
   composer.addPass(new THREE.RenderPass(scene, camera));
@@ -467,21 +484,29 @@
   }
 
   // ---------- seats -----------------------------------------------------
+  function makeTurnRing() {
+    const m = new THREE.Mesh(new THREE.RingGeometry(0.72, 0.84, 64),
+      new THREE.MeshBasicMaterial({ color: 0xffe084, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
+    m.rotation.x = -Math.PI / 2; m.userData.on = false; return m;
+  }
   const seats = SEAT_ANGLES.map((deg, i) => {
     const a = THREE.MathUtils.degToRad(deg);
     const pos = new THREE.Vector3(SEAT_RADIUS * Math.sin(a), 0.24, SEAT_RADIUS * Math.cos(a));
     const cards = new THREE.Group(); cards.position.set(CARD_RADIUS * Math.sin(a), 0.012, CARD_RADIUS * Math.cos(a)); cards.rotation.y = a; scene.add(cards);
     const chips = new THREE.Group(); chips.position.set(CHIP_RADIUS * Math.sin(a), 0.0, CHIP_RADIUS * Math.cos(a)); chips.rotation.y = a; scene.add(chips);
     const label = document.createElement("div"); label.className = "label glass"; document.getElementById("labels").appendChild(label);
-    return { index: i, angle: a, pos, hand: new Hand(cards), chips, chipCount: null, label, fly: null, kind: "empty", brainKey: "", lastResultKey: "" };
+    const ring = makeTurnRing(); ring.position.set(CARD_RADIUS * Math.sin(a), 0.006, CARD_RADIUS * Math.cos(a)); scene.add(ring);
+    return { index: i, angle: a, pos, hand: new Hand(cards), chips, chipCount: null, label, fly: null, kind: "empty", brainKey: "", lastResultKey: "", ring };
   });
   const dealer = (() => {
     const f = makeFly({ scale: 1.4, dealer: true });
     f.group.position.set(0, 0.3, -2.85); f.baseY = 0.3; f.baseRotY = 0; scene.add(f.group);
     const cards = new THREE.Group(); cards.position.set(0, 0.012, -0.95); cards.rotation.y = Math.PI; scene.add(cards);
     const label = document.createElement("div"); label.className = "label glass"; document.getElementById("labels").appendChild(label);
-    return { fly: f, hand: new Hand(cards), label, pos: f.group.position };
+    const ring = makeTurnRing(); ring.position.set(0, 0.006, -0.95); scene.add(ring);
+    return { fly: f, hand: new Hand(cards), label, pos: f.group.position, ring };
   })();
+  const turnRings = [...seats.map(s => s.ring), dealer.ring];
 
   function setFly(seat, kind) {
     if (seat.fly) {
@@ -606,7 +631,9 @@
   }
 
   // ---------- state -----------------------------------------------------
-  let state = null, myName = null, joined = false, lastMessage = "";
+  let state = null, joined = false, lastMessage = "";
+  // remembered across reloads so a refresh does not orphan the human seat
+  let myName = null; try { myName = localStorage.getItem("flyName"); } catch (e) {}
   const STATUS_HE = { idle: "", waiting: "תורך", thinking: "חושב...", hit: "HIT", stand: "STAND",
     bust: "נשרף", won: "ניצח", lost: "הפסיד", push: "תיקו", blackjack: "בלאקג'ק!" };
   const toast = document.getElementById("toast");
@@ -625,14 +652,23 @@
     dealer.hand.update(s.dealer.cards);
     dealer.label.innerHTML = `<span class="name">הדילר</span>` + (s.dealer.total != null ? `<span class="total">${s.dealer.total}</span>` : "");
     setAnim(dealer.fly, s.phase === "dealer" ? "thinking" : "idle", t);
+    const dealerActive = s.phase === "dealer";
+    dealer.ring.userData.on = dealerActive;
+    dealer.label.classList.toggle("active", dealerActive);
+    if (dealerActive) setView("dealer", DEALER_VIEW);
+    else if (s.phase === "dealing" || s.phase === "settle" || s.phase === "starting") setView("overview", OVERVIEW);
 
     s.seats.forEach((ss, i) => {
       const seat = seats[i]; if (!seat) return;
       if (seat.kind !== ss.kind) { seat.kind = ss.kind; setFly(seat, ss.kind); seat.chipCount = null; }
       seat.label.dataset.name = ss.name;
-      if (ss.kind === "empty") { seat.label.style.display = "none"; seat.hand.update([]); if (seat.chipCount !== 0) { buildStack(seat.chips, 0, 0); seat.chipCount = 0; } return; }
+      if (ss.kind === "empty") { seat.label.style.display = "none"; seat.ring.userData.on = false; seat.hand.update([]); if (seat.chipCount !== 0) { buildStack(seat.chips, 0, 0); seat.chipCount = 0; } return; }
       seat.label.style.display = "";
       seat.label.classList.toggle("me", ss.kind === "human" && ss.name === myName);
+      const active = ss.status === "thinking" || ss.status === "waiting" || ss.status === "hit";
+      seat.label.classList.toggle("active", active);
+      seat.ring.userData.on = active;
+      if (active) setView(`seat${i}`, seatView(seat.angle));
       const chips = ss.chips, cls = chips > 0 ? "pos" : chips < 0 ? "neg" : "";
       seat.label.innerHTML = `<span class="name">${ss.name}</span><span class="chips ${cls}">${chips > 0 ? "+" : ""}${chips}</span>` +
         `<span class="status ${ss.status}">${STATUS_HE[ss.status] ?? ""}${ss.cards.length ? `<span class="total">${ss.total}</span>` : ""}</span>`;
@@ -660,11 +696,18 @@
     joined = humanSeat.kind === "human" && humanSeat.name === myName;
     document.getElementById("join-box").style.display = humanSeat.kind === "empty" && !joined ? "" : "none";
     document.getElementById("play-box").style.display = joined ? "" : "none";
+    document.getElementById("takeover-box").style.display = humanSeat.kind === "human" && !joined ? "" : "none";
     const myTurn = joined && s.human_turn;
     document.getElementById("hit").disabled = !myTurn; document.getElementById("stand").disabled = !myTurn;
-    document.getElementById("hint").innerHTML = humanSeat.kind === "human" && !joined
-      ? `${humanSeat.name} יושב בכיסא · לחץ על זבוב לראות את המוח שלו`
-      : myTurn ? `תורך: <kbd>H</kbd> לקלף · <kbd>S</kbd> לעמוד` : "גרור לסובב · גלגלת לזום · לחץ על זבוב כדי לראות את המוח שלו";
+    const statusEl = document.getElementById("status");
+    const activeSeat = s.seats.find(x => x.kind !== "empty" && (x.status === "thinking" || x.status === "waiting" || x.status === "hit"));
+    const whose = dealerActive ? "הדילר משחק" : activeSeat ? `התור של ${activeSeat.name}` : s.phase === "settle" ? "סיכום היד" : "מחלקים";
+    if (myTurn) { statusEl.innerHTML = `<span class="pulse"></span>תורך! יש לך ${humanSeat.total}`; statusEl.className = "turn"; }
+    else if (joined) { statusEl.textContent = `אתה בשולחן · ${whose}`; statusEl.className = ""; }
+    else if (humanSeat.kind === "human") { statusEl.textContent = `${humanSeat.name} יושב בכיסא · ${whose}`; statusEl.className = ""; }
+    else { statusEl.textContent = `אתה צופה · ${whose}`; statusEl.className = ""; }
+    document.getElementById("hint").innerHTML = myTurn ? `<kbd>H</kbd> לקלף · <kbd>S</kbd> לעמוד`
+      : "גרור לסובב · גלגלת לזום · לחץ על זבוב כדי לראות את המוח שלו";
   }
 
   async function poll() {
@@ -675,10 +718,19 @@
 
   document.getElementById("join").onclick = async () => {
     myName = (document.getElementById("name").value || "You").trim().slice(0, 16);
+    try { localStorage.setItem("flyName", myName); } catch (e) {}
     await fetch("/join", { method: "POST", body: JSON.stringify({ name: myName }) });
   };
   document.getElementById("name").addEventListener("keydown", e => { if (e.key === "Enter" || e.keyCode === 13) document.getElementById("join").click(); });
-  document.getElementById("leave").onclick = async () => { await fetch("/leave", { method: "POST", body: "{}" }); myName = null; };
+  document.getElementById("leave").onclick = async () => {
+    await fetch("/leave", { method: "POST", body: "{}" }); myName = null;
+    try { localStorage.removeItem("flyName"); } catch (e) {}
+  };
+  // someone else's stale seat (or ours from a browser that forgot): offer to take it over
+  document.getElementById("takeover").onclick = async () => {
+    await fetch("/leave", { method: "POST", body: "{}" });
+    document.getElementById("join").click();
+  };
   document.getElementById("hit").onclick = () => fetch("/action", { method: "POST", body: JSON.stringify({ action: "HIT" }) });
   document.getElementById("stand").onclick = () => fetch("/action", { method: "POST", body: JSON.stringify({ action: "STAND" }) });
   addEventListener("keydown", (e) => {
@@ -714,7 +766,16 @@
   function render() {
     requestAnimationFrame(render);
     const t = clock.getElapsedTime(), now = performance.now();
-    if (!controls.autoRotate && now - lastInteraction > 20000) controls.autoRotate = true;
+    const idle = now - lastInteraction > 6000;
+    if (follow && idle) {
+      controls.autoRotate = false;
+      camera.position.lerp(view.pos, 0.035); controls.target.lerp(view.target, 0.035);
+    } else if (!follow && !controls.autoRotate && now - lastInteraction > 20000) controls.autoRotate = true;
+    for (const ring of turnRings) {
+      const target = ring.userData.on ? 0.55 + 0.3 * Math.sin(t * 5) : 0;
+      ring.material.opacity += (target - ring.material.opacity) * 0.12;
+      const sc = ring.userData.on ? 1 + 0.04 * Math.sin(t * 5) : 1; ring.scale.set(sc, sc, 1);
+    }
     controls.update(); runTweens(now);
     for (const s of seats) if (s.fly) animateFly(s.fly, t);
     animateFly(dealer.fly, t);
