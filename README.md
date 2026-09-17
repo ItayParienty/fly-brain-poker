@@ -1,97 +1,93 @@
-# Teaching a fly brain to play poker
+# A fly brain at the card table
 
 A spiking simulation of the *Drosophila* mushroom body — the fly's learning
-centre, wired as the FlyWire connectome measured it — sat down at a Texas
-Hold'em table.
+centre, wired as the FlyWire connectome measured it — playing poker and
+blackjack, in a 3D room you can sit down in.
 
-Nothing is trained here in the machine-learning sense. The wiring is the
+Nothing here is trained in the machine-learning sense. The wiring is the
 scanned wiring, the plasticity rule is the one the fly already uses, and the
-question is what such a circuit does when the thing it has to judge is a poker
-hand instead of a smell.
+question is what such a circuit does when what it has to judge is a hand of
+cards instead of a smell.
 
-Two results, one positive and one negative. The negative one is the more
-interesting of the two.
+<p align="center"><em>python table_server.py --learn → http://localhost:8765</em></p>
 
-## Result 1: the measured wiring carries poker-relevant structure
+## What was found
 
-Before any learning at all, the circuit raises **21.6% more often with a
-strong hand than a weak one**, and beats a tight opponent by 1.32 chips per
-hand. That is surprising enough to be suspicious, so the wiring was taken
-apart three ways (`innate.py`), each keeping the same sizes and weight
-distributions:
+**The measured wiring produces a stable policy; random wiring produces noise.**
+Before any learning, the circuit's behaviour under a fixed encoding is
+deterministic and repeatable. Randomising which MBONs drive which action, or
+rewiring the Kenyon cell → MBON connections while keeping their number and
+weights, turns that into a different policy on every seed, with a spread of
+±10–19 points (`innate.py`). The recorded connectivity is what fixes the
+behaviour.
 
-| Circuit | Discrimination | Chips/hand |
-|---|---|---|
-| **Measured connectome** | **+21.6%** | **+1.317** |
-| MBONs assigned to actions at random | −11.3% ±19.9% | +0.617 |
-| Kenyon cell → MBON connections rewired at random | −10.8% ±13.2% | −0.092 |
-| Both | +10.1% ±11.9% | +0.150 |
+**But the policy is not knowledge.** In poker the innate circuit raises 19.5%
+*more* often with weak hands than strong ones — a bluffing habit that happens
+to beat a tight opponent (+0.56 chips/hand) because bluffs work on a player
+who folds. In blackjack it agrees with basic strategy on 66% of
+frequency-weighted decisions and still hits a hard 18 against most dealer
+cards. Which way the bias points is an accident of which olfactory neurons
+the encoder assigned to card strength; only its stability is a property of
+the wiring.
 
-Every randomisation destroys the effect and replaces a stable number with
-noise swinging ±20%. The behaviour comes from the recorded connectivity, not
-from the encoding or from the architecture in general.
+**Dopamine-gated depression did not teach it either game.** Training on real
+outcomes is compared against training on outcomes with a randomly assigned
+sign — the same perturbation of the synapses, carrying no information.
 
-## Result 2: outcome-driven dopamine learning did not teach it the cards
+| Game | No plasticity | Random-sign reward | Real reward |
+|---|---|---|---|
+| Poker, discrimination | −19.5% | −17.0% ±0.2 | −17.0% ±0.5 |
+| Poker, chips/hand | +0.558 | +0.404 | +0.379 |
+| Blackjack, agreement with basic strategy | 66.1% | 58.5% ±0.1 | 62.8% ±1.6 |
+| Blackjack, hits on hard 17–21 | 33.4% | 55.4% ±1.2 | 39.2% ±1.6 |
+| Blackjack, return/hand | −0.313 | −0.525 ±0.006 | −0.372 ±0.005 |
 
-Training with real hand outcomes was compared against training where the
-reward keeps its size but has its sign randomised — the same perturbation, no
-information (`experiment.py`, 4 repeats × 1,200 hands):
+In poker the reward's sign makes no difference at all. In blackjack it does —
+real reward beats random-sign reward on every measure, by 30× the run-to-run
+spread, so the signal carries information — but plasticity as a whole still
+leaves the fly worse than it started, and at learning rates low enough not
+to damage the innate policy it stops moving at all. The rule disturbs the
+circuit more than it instructs it.
 
-| Group | Discrimination | Chips/hand |
-|---|---|---|
-| No plasticity | +21.6% ±0.0% | +1.317 |
-| Reward sign randomised | +24.6% ±0.3% | +1.346 |
-| Real outcomes | +24.8% ±0.0% | +1.350 |
+### Why blackjack shows a signal and poker does not
 
-Real reward beats random reward by **0.2%**, against ±0.3% run-to-run noise.
-Plasticity does move the circuit, but the reward signal contributes nothing:
-almost all of the change is the circuit being disturbed rather than taught.
+The plasticity rule pairs a stimulus with the outcome of a single trial and
+depends on repetition to average out noise. A poker situation almost never
+recurs — five continuous features and an opponent who reacts — so the noise in
+one hand's result never cancels. A blackjack state is a total and a dealer
+card; "16 against a 10" comes up dozens of times in a few hundred hands.
 
-An earlier version of this project would have reported the first number in
-that table against the last and claimed a fly had learned poker.
+What the rule then learns is the obvious part. Hitting a hard 20 busts nine
+times in ten and its signature is unmistakable; hard 16 against a 10 loses
+about as often either way, and a rule that updates on single outcomes cannot
+resolve a two-point difference in expectation. The same code passes the
+classic odour-conditioning protocol cleanly (`conditioning.py`: a punished
+odour loses 23% of its approach drive, a control odour 1%), so this is the
+rule meeting a task it was not built for, not a broken implementation.
 
-### Why not — and the check that rules out a broken implementation
+Two pieces of biology turned out to be load-bearing rather than decorative.
+Depression-only learning is a one-way ratchet and saturates unless synapses
+recover — without recovery the fly fell silent and folded everything after
+a few hundred hands. And in a game you mostly lose, dopamine has to report
+the outcome *relative to expectation*: scoring a routine loss as punishment
+punishes whatever the fly does most, correct or not, and the policy flips
+instead of converging. Reward prediction error, which is how dopamine is
+described in mammals and increasingly in flies, fixed that.
 
-The same plasticity code was given the task it evolved for: pair one odour
-with punishment, leave another alone (`conditioning.py`, the Tully & Quinn
-protocol).
+## A result that was retracted
 
-```
-punished odour   approach drive  −23.3%
-control odour    approach drive   −0.8%
-```
-
-It learns, and the learning is specific to the punished stimulus. The
-mechanism is intact; poker is what defeats it. Fly conditioning pairs a
-stimulus with a *deterministic* outcome — this odour always precedes sugar.
-A poker hand does not work that way: the identical decision wins or loses
-depending on cards still to come, so the teaching signal is mostly variance.
-Depression gated on a single trial's outcome has no way to average that out,
-and 5,000 hands did not help either.
-
-## Things that had to be right first
-
-Most of the work was finding out what the circuit needs in order to represent
-anything at all. Three bugs, each with a measurable signature:
-
-**Saturation.** Depression-only learning is a one-way ratchet: every hand
-weakens something and nothing recovers. Profit peaked at +0.98 chips/hand
-around hand 200, then decayed to +0.08 by hand 600 with 53% of synapses
-pinned at the floor — the fly went quiet and folded everything. Flies avoid
-this by forgetting, and adding synaptic recovery turned the ratchet into a
-stable balance.
-
-**Saturation, again, at the input.** A Gaussian tuning curve leaks current
-into its tails. Across five features that was enough to drive 62% of Kenyon
-cells instead of the calibrated 8%, and the overlap between pocket aces and
-seven-deuce reached 91% — every situation looked alike.
-
-**No similarity gradient.** With one neuron per value, hand strength 0.10 and
-0.20 shared 38.6% of their Kenyon cells, and 0.10 and 0.90 shared 37.3% —
-i.e. nearby hands were exactly as different as opposite ones, so "a strong
-hand" could never form as a category. Widening the tuning so each value spans
-a band of neurons produced a real gradient: 100% overlap at a distance of
-0.05, 36% at 0.4, 24% at 0.8. This single fix is what produced Result 1.
+An earlier version of this README reported that the untrained circuit
+discriminated strong from weak poker hands by **+21.6%**, with randomised
+wiring collapsing to noise, and called it structure in the connectome. That
+number was produced by a bug in the encoder: the *K* olfactory neurons
+nearest to any feature value near the end of its range were simply the *K*
+neurons at that end, so hand strengths above ~0.8 — and blackjack totals 18
+through 21 — all drove the identical set of neurons and were
+indistinguishable to the circuit. Fixing it (padding the slot axis by half a
+window, `fly.py`) flipped the poker bias to −19.5% and lifted the untrained
+blackjack fly from 59% to 66% agreement. The stability-versus-noise contrast
+survived the fix; the claim about what the bias meant did not. Both the
+original numbers and the corrected ones are in the commit history.
 
 ## The circuit
 
@@ -106,10 +102,10 @@ a band of neurons produced a real gradient: 100% overlap at a distance of
               |
               |  <-- 38,915 connections.  The only ones plasticity touches.
               v
-      MBON        96   grouped by transmitter -> raise / fold / call
+      MBON        96   grouped by transmitter -> the action
               ^
-      DAN      331   dopamine: the outcome of the hand
-              
+      DAN      331   dopamine: the outcome, relative to expectation
+
       APL        2   one giant inhibitory neuron per hemisphere
 ```
 
@@ -128,55 +124,59 @@ hemisphere; FlyWire's annotators label them `APL-RHS` and `APL-LHS`. Silencing
 them raises Kenyon cell activity from 7.9% to 21.7% — a 2.7× loss of
 sparseness, which is the role the literature assigns them.
 
+## The table
+
+`table_server.py` runs a blackjack table with three flies, a dealer and a
+seat for you, and serves it to a three.js front end. The flies are built from
+their anatomy — thorax, striped abdomen, compound eyes, antennae, six jointed
+legs, halteres, veined wings — and animated from the game: wings flutter while
+one thinks, it hops on a hit, droops on a bust, jumps on a win, and grooms its
+front legs when it has nothing to do. Cards are dealt from the shoe and flip
+in the air; chips travel between seat and tray when a hand settles.
+
+Every fly decision comes with a recording of the circuit making it: which of
+the 5,177 Kenyon cells fired on each of the 60 timesteps, and how the HIT and
+STAND votes built up. Click a fly to pin its brain. With `--learn` the flies
+keep learning while they play and their synapses are saved between runs.
+
 ## What this does not claim
 
 - The connectome gives synapse **counts** and, through neurotransmitter
-  prediction, the **sign** of a connection. It does not give absolute synaptic
-  strength; `DEFAULT_WEIGHT_SCALE` is calibrated against measured Kenyon cell
-  sparseness, and every connectome simulation has a number like it.
+  prediction, the **sign** of a connection. It does not give absolute
+  synaptic strength; `DEFAULT_WEIGHT_SCALE` is calibrated against measured
+  Kenyon cell sparseness, and every connectome simulation has a number like it.
 - Neurotransmitter identity is itself a prediction, not a measurement.
-- Mapping cholinergic / glutamatergic / GABAergic MBONs onto raise / fold /
-  call follows their reported valence, but the assignment is an
-  interpretation.
-- Hand strength and pot odds are computed and handed to the fly. It is given
-  perception; what it would have to learn is what to do about it.
-- Result 1 says the measured wiring produces a useful bias under this
-  encoding. It does not say the fly understands poker.
+- Mapping MBONs onto actions by transmitter follows their reported valence,
+  but the assignment is an interpretation.
+- Hand strength, pot odds and blackjack totals are computed and handed to the
+  fly. It is given perception; what it would have to learn is what to do
+  about it.
 
 ## Running it
 
 ```bash
 pip install -r requirements.txt
-python download_data.py     # ~50 MB from FlyWire, once
+python download_data.py          # ~50 MB from FlyWire, once
 
-python connectome.py        # build the circuit, print its composition
-python verify_brain.py      # sparseness, separation, reliability, APL
-python calibrate.py         # sweep the one free parameter
+python table_server.py --learn   # the table, at http://localhost:8765
 
-python baseline.py          # how an untrained fly plays
-python innate.py            # Result 1: measured wiring vs randomised
-python experiment.py        # Result 2: real reward vs randomised reward
-python conditioning.py      # the classic odour protocol, as a positive control
+python connectome.py             # build the circuit, print its composition
+python verify_brain.py           # sparseness, separation, reliability, APL
+python calibrate.py              # sweep the one free parameter
+
+python innate.py                 # measured wiring vs randomised (poker)
+python experiment.py             # real vs random-sign reward (poker)
+python blackjack_experiment.py   # the same, for blackjack
+python conditioning.py           # classic odour conditioning, as a positive control
 ```
 
 Smaller pieces, worth reading first:
 
 ```bash
-python demo_neuron.py       # one neuron charging, leaking, firing
-python game.py              # one scripted heads-up hand
+python demo_neuron.py            # one neuron charging, leaking, firing
+python game.py                   # one scripted heads-up poker hand
+python blackjack.py              # basic strategy vs mimic-the-dealer vs always-stand
 ```
-
-## Status
-
-- [x] Load the FlyWire connectome, extract the mushroom body circuit
-- [x] Vectorised leaky integrate-and-fire simulation, several flies in parallel
-- [x] Calibrate to biological sparseness; verify separation and reliability
-- [x] Texas Hold'em engine (heads-up, fixed raise sizes)
-- [x] Encode the table as an odour, decode MBONs into an action
-- [x] Dopamine-gated plasticity, with the controls to test whether it teaches
-- [ ] A task whose feedback is deterministic enough for this rule to learn from
-- [ ] Multi-way table
-- [ ] Visualisation, and a seat for a human player
 
 ## Data
 
