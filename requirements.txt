@@ -1,3 +1,7 @@
 numpy
 scipy
 pandas
+pillow
+# for the eye (flybrain/vision.py, bloons/): torch with CUDA, e.g.
+#   pip install torch --index-url https://download.pytorch.org/whl/cu118
+torch

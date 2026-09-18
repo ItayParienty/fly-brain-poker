@@ -19,6 +19,9 @@ FILES = {
     "connections.csv.gz": "neuron-to-neuron connections, synapse counts, neurotransmitters",
     "classification.csv.gz": "per-neuron class / super_class / flow annotations",
     "neurons.csv.gz": "per-neuron neurotransmitter predictions and scores",
+    # the optic lobe atlas (Matsliah et al. 2024), for the eye
+    "visual_neuron_types.csv.gz": "cell type, family and side of every visual-system neuron",
+    "column_assignment.csv.gz": "which of the ~800 columns of the eye each columnar neuron belongs to",
 }
 
 
