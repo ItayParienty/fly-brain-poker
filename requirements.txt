@@ -2,6 +2,7 @@ numpy
 scipy
 pandas
 pillow
-# for the eye (flybrain/vision.py, bloons/): torch with CUDA, e.g.
-#   pip install torch --index-url https://download.pytorch.org/whl/cu118
+# the eye runs on the GPU: torch with CUDA, e.g.
+#   pip install torch==2.7.1 torchvision==0.22.1 --index-url https://download.pytorch.org/whl/cu118
 torch
+# flyvis (Lappalainen et al. 2024) is only needed to regenerate flybrain/flyvis_params.json
