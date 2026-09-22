@@ -21,11 +21,14 @@ is fitted to a blank screen (Eye.calibrate) as before.
     circuit, dyn = flyvis_circuit()          # weights in flyvis units, plus tau/bias per neuron
     net = FlyvisNetwork(circuit.weights, dyn)
 """
+import hashlib
+
 import numpy as np
 import torch
 from scipy import sparse
 
 from flybrain import flyvis_params
+from flybrain.connectome import DATA_DIR
 from flybrain.vision import load_visual_circuit
 
 # FlyWire names -> flyvis names (CT1 is handled by split_ct1 below)
@@ -206,11 +209,26 @@ class FlyvisNetwork:
         return total / steps
 
 
-def make_eye(side="right", dt=0.0125, rounds=60, verbose=False):
+def make_eye(side="right", dt=0.0125, rounds=60, verbose=False, rebuild=False):
     """The complete eye: circuit, screen mapping, and the network with resting
     potentials - flyvis's for the types it has, fitted to a blank screen for
-    the rest (towards the median resting output of the flyvis types)."""
-    from flybrain.vision import Eye
+    the rest (towards the median resting output of the flyvis types).
+
+    Building it takes a minute; the result is cached in data/ and rebuilt
+    when flyvis_params.json changes (or with rebuild=True)."""
+    from flybrain.vision import Eye, VisualCircuit
+    stamp = hashlib.sha1(flyvis_params.OUT.read_bytes()).hexdigest()[:10]
+    cache = DATA_DIR / f"flyvis_eye_{side}_{int(round(dt * 1e4))}_{rounds}_{stamp}.npz"
+    if cache.exists() and not rebuild:
+        b = np.load(cache, allow_pickle=False)
+        w = sparse.csr_matrix((b["w_data"], b["w_indices"], b["w_indptr"]), shape=tuple(b["w_shape"]))
+        m = sparse.csr_matrix((b["m_data"], b["m_indices"], b["m_indptr"]), shape=tuple(b["w_shape"]))
+        c = VisualCircuit(b["ids"], b["classes"], w, m, b["nt"], b["column"], b["columns_xy"], side)
+        dyn = dict(tau=b["tau"], bias=b["flyvis_bias"], known=b["known"], pairs_covered=float(b["pairs_covered"]))
+        net = FlyvisNetwork(c.weights, dyn, dt=dt)
+        net.bias = torch.as_tensor(b["bias"], device=net.device)
+        eye = Eye(c, strength=1.0); eye.bias[:] = 0.0; eye.dyn = dyn
+        return c, eye, net
     c, dyn = flyvis_circuit(side)
     net = FlyvisNetwork(c.weights, dyn, dt=dt)
     eye = Eye(c, strength=1.0)
@@ -228,6 +246,13 @@ def make_eye(side="right", dt=0.0125, rounds=60, verbose=False):
         if verbose and r % 20 == 0:
             print(f"  round {r}: unknown types median {float(a[~known].median()):.3f} vs target {float(a[known].median()):.3f}")
     eye.dyn = dyn
+    w, m = c.weights.tocsr(), c.modulatory.tocsr()
+    np.savez_compressed(cache, ids=c.neuron_ids, classes=c.neuron_classes.astype(str), nt=c.neuron_nt.astype(str),
+                        column=c.column, columns_xy=c.columns_xy, w_shape=np.array(w.shape),
+                        w_data=w.data, w_indices=w.indices, w_indptr=w.indptr,
+                        m_data=m.data, m_indices=m.indices, m_indptr=m.indptr,
+                        tau=dyn["tau"], flyvis_bias=dyn["bias"], known=dyn["known"], pairs_covered=dyn["pairs_covered"],
+                        bias=net.bias.cpu().numpy())
     return c, eye, net
 
 

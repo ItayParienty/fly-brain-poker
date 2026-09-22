@@ -2,6 +2,8 @@ numpy
 scipy
 pandas
 pillow
+# the screen-to-eye compositor (bloons/screen.py)
+numba
 # the eye runs on the GPU: torch with CUDA, e.g.
 #   pip install torch==2.7.1 torchvision==0.22.1 --index-url https://download.pytorch.org/whl/cu118
 torch

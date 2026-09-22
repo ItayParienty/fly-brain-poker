@@ -1,14 +1,30 @@
-"""Draws a Game as the 640x480 screen the fly will look at.
+"""Draws a Game as the 640x480 screen the fly looks at.
 
 Our own drawing, laid out like the original (rules.py has the measured
 geometry): the map on the left, the panel on the right with Round / Money /
-Lives, the five tower buttons, Start Round, the upgrade panel for a selected
-tower, and the hint box between rounds.
+Lives, the five tower buttons, Start Round, the upgrade panel for a
+selected tower, the tower-info box while the pointer is over a button, the
+message box, and the pointer itself with the tower it is holding.
 
-    frame = render(game)          # PIL.Image, RGB, 640x480
+A frame is a fixed background plus sprites.  Every bloon, tower, dart,
+button and line of text is drawn once, with PIL, into a small image and
+cached; a frame is those images pasted at their places, in order.  The one
+list of pastes gives two things:
+
+  * `render(game, mouse)` - the whole picture, for people and videos
+  * `Retina(owner, n).colours(game, mouse)` - only what each of the eye's
+    columns sees: the mean colour of its patch.  It pastes into a canvas
+    too, but reads back only the pixels the sprites covered and adds their
+    difference from the background to the background's own column means.
+    The same pixels as `render`, at a small fraction of the cost - which
+    matters, because the fly sees all 40 frames of every second.
+
+    frame = render(game, mouse)              # PIL.Image, RGB, 640x480
 """
 import math
 
+import numba
+import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from bloons import rules as R
@@ -24,6 +40,16 @@ BLOON_COLOURS = {
 }
 TOWER_COLOURS = {"Dart": (150, 95, 40), "Tack": (245, 150, 190), "Ice": (150, 220, 255),
                  "Bomb": (35, 35, 35), "Super": (230, 40, 40)}
+TOWER_NAMES = {"Dart": "Dart Tower", "Tack": "Tack Tower", "Ice": "Ice Tower", "Bomb": "Bomb Tower", "Super": "Super Monkey"}
+TOWER_INFO = {                                    # [C] ShowTowerInfo
+    "Dart": "Shoots a single dart. Can upgrade to piercing darts and long range darts",
+    "Tack": "Shoots volley of tacks in 8 directions. Can upgrade its shoot speed and its range.",
+    "Bomb": "Launches a bomb that explodes on impact. Can upgrade to bigger bombs and longer range.",
+    "Ice": "Freezes nearby bloons. Frozen bloons are immune to darts and tacks, but bombs will destroy them. "
+           "Can upgrade to increased freeze time, and larger freeze radius.",
+    "Super": "Super monkey shoots a continuous stream of darts and can mow down even the fastest and most stubborn bloons.",
+}
+ANGLES = 32                                        # a tower's or dart's heading is drawn in 32 steps
 
 try:
     _FONT = ImageFont.truetype("arial.ttf", 17)
@@ -31,14 +57,15 @@ try:
     _FONT_BIG = ImageFont.truetype("arial.ttf", 22)
 except OSError:                                   # no Arial: PIL's built-in font
     _FONT = _FONT_SMALL = _FONT_BIG = ImageFont.load_default()
+DIGIT_W = int(round(_FONT_BIG.getlength("0")))
 
 
+# ---------------------------------------------------------------- the background
 def _background():
-    """The map: grass with the stone track along the waypoints. Drawn once."""
+    """The map, and the parts of the panel that never change. Drawn once."""
     im = Image.new("RGB", (R.WIDTH, R.HEIGHT), GRASS)
     d = ImageDraw.Draw(im)
-    # a little texture so the grass is not one flat value
-    for y in range(0, R.HEIGHT, 8):
+    for y in range(0, R.HEIGHT, 8):                  # a little texture so the grass is not one flat value
         for x in range(0, R.PANEL_X, 8):
             if (x * 7 + y * 13) % 5 == 0:
                 d.rectangle([x, y, x + 3, y + 3], fill=GRASS_DARK)
@@ -48,144 +75,391 @@ def _background():
         d.rectangle([min(x0, x1) - w - 2, min(y0, y1) - w - 2, max(x0, x1) + w + 2, max(y0, y1) + w + 2], fill=STONE_EDGE)
     for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
         d.rectangle([min(x0, x1) - w, min(y0, y1) - w, max(x0, x1) + w, max(y0, y1) + w], fill=STONE)
-    # tile seams every 40 px of track
     s = 0.0
-    while s < R.PATH_LENGTH:
+    while s < R.PATH_LENGTH:                            # tile seams every 40 px of track
         x, y = point_at(s)
         d.ellipse([x - 2, y - 2, x + 2, y + 2], fill=STONE_EDGE)
         s += 40
+    # the panel
+    d.rectangle([R.PANEL_X, 0, R.WIDTH, R.HEIGHT], fill=(60, 60, 60))
+    d.rounded_rectangle(R.PANEL, radius=8, fill=PANEL_BG, outline=PANEL_EDGE, width=3)
+    for label, y in R.TEXT_ROWS.items():
+        d.text((R.PANEL[0] + 10, y - 10), f"{label}:", fill=TEXT, font=_FONT_BIG)
+    d.text((R.PANEL[0] + 10, R.BUILD_LABEL_Y - 10), "Build Towers", fill=TEXT, font=_FONT_BIG)
+    d.line([R.PANEL[0] + 10, R.BUILD_LABEL_Y + 11, R.PANEL[2] - 10, R.BUILD_LABEL_Y + 11], fill=TEXT, width=2)
+    for kind, x in zip(R.TOWER_ORDER, R.TOWER_BUTTON_X):  # always in colour, as in the original
+        r = R.TOWER_BUTTON_R
+        d.ellipse([x - r, R.TOWER_BUTTON_Y - r, x + r, R.TOWER_BUTTON_Y + r], fill=TOWER_COLOURS[kind], outline=(40, 40, 40), width=2)
+    for box, text in ((R.MORE_GAMES_BUTTON, "More games"), (R.RESTART_BUTTON, "Restart")):
+        d.rounded_rectangle(box, radius=9, fill=(200, 215, 200), outline=(40, 40, 40))
+        tw = d.textlength(text, font=_FONT_SMALL)
+        d.text(((box[0] + box[2]) / 2 - tw / 2, box[1] + 3), text, fill=(20, 20, 20), font=_FONT_SMALL)
     return im
 
 
 _BG = _background()
 
 
-def _button(d, box, text, fill, font=_FONT):
-    x0, y0, x1, y1 = box
-    d.rounded_rectangle(box, radius=6, fill=fill, outline=(60, 60, 60))
-    tw = d.textlength(text, font=font)
-    d.text(((x0 + x1) / 2 - tw / 2, (y0 + y1) / 2 - 9), text, fill=(255, 255, 255), font=font)
+# ---------------------------------------------------------------- sprites
+class Sprite:
+    """A small picture with an anchor: pasted so that the anchor lands on (x, y).
+    Only its opaque pixels are kept - every sprite here is solid where it is drawn."""
+    __slots__ = ("ax", "ay", "w", "h", "ys", "xs", "rgb", "rgb01")
+
+    def __init__(self, im, ax, ay):
+        a = np.asarray(im.convert("RGBA"))
+        self.ax, self.ay, self.h, self.w = ax, ay, a.shape[0], a.shape[1]
+        self.ys, self.xs = np.nonzero(a[:, :, 3] > 127)
+        self.rgb = a[self.ys, self.xs, :3].astype(np.float32)
+        self.rgb01 = self.rgb / 255.0                   # as the eye takes it
 
 
-def _tower(d, t, selected=False):
-    c = TOWER_COLOURS[t.kind]
-    if selected:
-        r = t.range
-        d.ellipse([t.x - r, t.y - r, t.x + r, t.y + r], fill=None, outline=(255, 255, 255), width=2)
-    if t.kind == "Tack":
-        d.regular_polygon((t.x, t.y, 13), 8, fill=c, outline=(120, 60, 90))
-        d.ellipse([t.x - 5, t.y - 5, t.x + 5, t.y + 5], fill=(255, 255, 255))
-    elif t.kind == "Ice":
-        d.regular_polygon((t.x, t.y, 13), 6, fill=c, outline=(80, 140, 200))
-    elif t.kind == "Bomb":
-        d.ellipse([t.x - 12, t.y - 12, t.x + 12, t.y + 12], fill=c, outline=(90, 90, 90))
-        d.line([t.x, t.y, t.x + 14 * math.cos(t.angle), t.y + 14 * math.sin(t.angle)], fill=(90, 90, 90), width=5)
-    else:                                                # a monkey: body, head, facing its target
-        d.ellipse([t.x - 12, t.y - 10, t.x + 12, t.y + 10], fill=c, outline=(80, 50, 20))
-        hx, hy = t.x + 9 * math.cos(t.angle), t.y + 9 * math.sin(t.angle)
-        d.ellipse([hx - 7, hy - 7, hx + 7, hy + 7], fill=(230, 190, 120) if t.kind == "Dart" else (40, 60, 200))
-    for i, up in enumerate(t.upgrades):                  # little pips for bought upgrades
-        if up: d.ellipse([t.x - 12 + i * 8, t.y + 11, t.x - 7 + i * 8, t.y + 16], fill=(255, 230, 60))
+_CACHE = {}
 
 
-def _bloon(d, b, frame):
-    x, y = b.pos
-    c = BLOON_COLOURS[b.kind]
-    if b.frozen: c = tuple(int(v * 0.5 + 120) for v in c)
-    if b.popped: c = tuple(int(v * 0.6 + 100) for v in c)
+def sprite(key):
+    s = _CACHE.get(key)
+    if s is None:
+        s = _CACHE[key] = _DRAW[key[0]](*key[1:])
+    return s
+
+
+def _canvas(w, h):
+    im = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    return im, ImageDraw.Draw(im)
+
+
+def _bloon(kind, state):
+    im, d = _canvas(24, 30)
+    c = BLOON_COLOURS[kind]
+    if state == "frozen": c = tuple(int(v * 0.5 + 120) for v in c)
+    if state == "popped": c = tuple(int(v * 0.6 + 100) for v in c)
+    x, y = 12, 14
     d.ellipse([x - 10, y - 13, x + 10, y + 11], fill=c, outline=(20, 20, 20))
     d.polygon([(x, y + 11), (x - 3, y + 15), (x + 3, y + 15)], fill=c)
     d.ellipse([x - 6, y - 9, x - 2, y - 4], fill=tuple(min(255, v + 90) for v in c))
+    return Sprite(im, x, y)
 
 
-def render(game, cursor=None):
-    im = _BG.copy()
-    d = ImageDraw.Draw(im)
+def _tower(kind, angle_step, upgrades):
+    im, d = _canvas(40, 40)
+    x, y, c = 20, 20, TOWER_COLOURS[kind]
+    angle = angle_step * 2 * math.pi / ANGLES
+    if kind == "Tack":
+        d.regular_polygon((x, y, 13), 8, fill=c, outline=(120, 60, 90))
+        d.ellipse([x - 5, y - 5, x + 5, y + 5], fill=(255, 255, 255))
+    elif kind == "Ice":
+        d.regular_polygon((x, y, 13), 6, fill=c, outline=(80, 140, 200))
+    elif kind == "Bomb":
+        d.ellipse([x - 12, y - 12, x + 12, y + 12], fill=c, outline=(90, 90, 90))
+        d.line([x, y, x + 14 * math.cos(angle), y + 14 * math.sin(angle)], fill=(90, 90, 90), width=5)
+    else:                                                # a monkey: body, head, facing its target
+        d.ellipse([x - 12, y - 10, x + 12, y + 10], fill=c, outline=(80, 50, 20))
+        hx, hy = x + 9 * math.cos(angle), y + 9 * math.sin(angle)
+        d.ellipse([hx - 7, hy - 7, hx + 7, hy + 7], fill=(230, 190, 120) if kind == "Dart" else (40, 60, 200))
+    for i, up in enumerate(upgrades):                    # little pips for bought upgrades
+        if up: d.ellipse([x - 12 + i * 8, y + 11, x - 7 + i * 8, y + 16], fill=(255, 230, 60))
+    return Sprite(im, x, y)
+
+
+def _ring(r, colour, width):
+    im, d = _canvas(2 * r + 4, 2 * r + 4)
+    d.ellipse([2, 2, 2 * r + 2, 2 * r + 2], fill=None, outline=colour, width=width)
+    return Sprite(im, r + 2, r + 2)
+
+
+def _dart(angle_step):
+    im, d = _canvas(24, 24)
+    a = angle_step * 2 * math.pi / ANGLES
+    d.line([12, 12, 12 - math.cos(a) * 10, 12 - math.sin(a) * 10], fill=(60, 60, 60), width=3)
+    return Sprite(im, 12, 12)
+
+
+def _dot(r, colour):
+    im, d = _canvas(2 * r + 2, 2 * r + 2)
+    d.ellipse([0, 0, 2 * r, 2 * r], fill=colour)
+    return Sprite(im, r, r)
+
+
+def _box_outline(w, h, colour, oval):
+    im, d = _canvas(w + 1, h + 1)
+    (d.ellipse if oval else d.rectangle)([0, 0, w, h], fill=None, outline=colour, width=3 if oval else 2)
+    return Sprite(im, 0, 0)
+
+
+def _pointer():
+    im, d = _canvas(14, 21)
+    d.polygon([(0, 0), (12, 10), (5, 11), (8, 18), (5, 19), (2, 12), (0, 16)], fill=(255, 255, 255), outline=(0, 0, 0))
+    return Sprite(im, 0, 0)
+
+
+def _text_in(im, d, box, lines, font, colour, align="centre", top=None, step=14):
+    y = box[1] + 8 if top is None else top
+    for line in lines:
+        tw = d.textlength(line, font=font)
+        x = (box[0] + box[2]) / 2 - tw / 2 if align == "centre" else box[0] + 8
+        d.text((x, y), line, fill=colour, font=font); y += step
+
+
+def _wrap(d, text, font, width):
+    lines, cur = [], ""
+    for w in text.split():
+        if d.textlength((cur + " " + w).strip(), font=font) > width:
+            lines.append(cur); cur = w
+        else:
+            cur = (cur + " " + w).strip()
+    return lines + [cur]
+
+
+def _digit(ch):
+    """One digit of the panel's numbers (Arial's digits are all the same width)."""
+    im = Image.new("L", (DIGIT_W + 2, 28), 0)
+    ImageDraw.Draw(im).text((0, 0), ch, fill=255, font=_FONT_BIG)
+    rgba = Image.new("RGBA", im.size, TEXT + (0,)); rgba.putalpha(im)
+    return Sprite(rgba, 0, 0)
+
+
+def _options(kind, upgrades, affordable, sell_value, rng):
+    """The upgrade panel of a selected tower (toweroptions)."""
+    x0, y0, x1, y1 = R.PANEL[0] + 4, R.UPGRADE_TITLE_Y - 12, R.PANEL[2] - 4, R.SELL_BUTTON[3] + 2
+    im, d = _canvas(x1 - x0, y1 - y0)
+    sh = lambda b: (b[0] - x0, b[1] - y0, b[2] - x0, b[3] - y0)
+    d.rectangle([0, 0, x1 - x0, y1 - y0], fill=PANEL_BG)
+    d.text((6, R.UPGRADE_TITLE_Y - 9 - y0), TOWER_NAMES[kind], fill=TEXT, font=_FONT)
+    d.text((10, R.UPGRADE_SPEED_Y - 7 - y0), "Speed:", fill=TEXT, font=_FONT_SMALL)
+    d.text((86, R.UPGRADE_SPEED_Y - 7 - y0), R.TOWERS[kind].get("speed", ""), fill=TEXT, font=_FONT_SMALL)
+    d.text((10, R.UPGRADE_RANGE_Y - 7 - y0), "Range:", fill=TEXT, font=_FONT_SMALL)
+    d.text((86, R.UPGRADE_RANGE_Y - 7 - y0), str(rng), fill=TEXT, font=_FONT_SMALL)
+    for i, (name, cost, _) in enumerate(R.UPGRADES[kind]):
+        box = sh(R.UPGRADE_BUTTONS[i]); bought = upgrades[i]
+        fill = (110, 110, 110) if bought else ((70, 150, 70) if affordable[i] else (180, 70, 60))
+        d.rounded_rectangle(box, radius=5, fill=fill, outline=(60, 60, 60))
+        tail = ["Bought"] if bought else (["Buy for:", str(cost)] if affordable[i] else ["Can't Afford", str(cost)])
+        _text_in(im, d, box, name.split() + tail, _FONT_SMALL, (255, 255, 255))
+    box = sh(R.SELL_BUTTON)
+    d.rounded_rectangle(box, radius=6, fill=(190, 60, 50), outline=(60, 60, 60))
+    _text_in(im, d, box, [f"Sell for: {sell_value}"], _FONT_SMALL, (255, 255, 255), top=box[1] + 7)
+    return Sprite(im, -x0, -y0)
+
+
+def _towerinfo(kind):
+    x0, y0, x1, y1 = R.TOWERINFO_BOX
+    im, d = _canvas(x1 - x0 + 1, y1 - y0 + 1)
+    d.rounded_rectangle([0, 0, x1 - x0, y1 - y0], radius=6, fill=(235, 245, 235), outline=(60, 90, 60), width=2)
+    d.text((8, 6), TOWER_NAMES[kind], fill=TEXT, font=_FONT)
+    d.text((8, 28), f"Cost: {R.TOWERS[kind]['cost']}   Speed: {R.TOWERS[kind]['speed']}", fill=TEXT, font=_FONT_SMALL)
+    lines = _wrap(d, TOWER_INFO[kind], _FONT_SMALL, x1 - x0 - 16)
+    _text_in(im, d, (0, 0, x1 - x0, 0), lines[:7], _FONT_SMALL, (20, 20, 20), align="left", top=48, step=15)
+    return Sprite(im, -x0, -y0)
+
+
+def _start():
+    x0, y0, x1, y1 = R.START_BUTTON
+    im, d = _canvas(x1 - x0 + 1, y1 - y0 + 1)
+    d.rounded_rectangle([0, 0, x1 - x0, y1 - y0], radius=6, fill=(90, 170, 90), outline=(60, 60, 60))
+    tw = d.textlength("Start Round", font=_FONT)
+    d.text(((x1 - x0) / 2 - tw / 2, (y1 - y0) / 2 - 9), "Start Round", fill=(255, 255, 255), font=_FONT)
+    return Sprite(im, -x0, -y0)
+
+
+def _message(text):
+    x0, y0, x1, y1 = R.HINT_BOX
+    im, d = _canvas(x1 - x0 + 1, y1 - y0 + 1)
+    d.rounded_rectangle([0, 0, x1 - x0, y1 - y0], radius=8, fill=(255, 255, 255), outline=(60, 60, 60))
+    lines = _wrap(d, text, _FONT_SMALL, x1 - x0 - 16)
+    _text_in(im, d, (0, 0, x1 - x0, 0), lines[:4], _FONT_SMALL, (20, 20, 20), align="left", top=8, step=16)
+    return Sprite(im, -x0, -y0)
+
+
+def _banner(text):
+    im, d = _canvas(241, 61)
+    d.rounded_rectangle([0, 0, 240, 60], radius=10, fill=(255, 255, 255), outline=(60, 60, 60))
+    tw = d.textlength(text, font=_FONT_BIG)
+    d.text((120 - tw / 2, 18), text, fill=(20, 20, 20), font=_FONT_BIG)
+    return Sprite(im, -200, -200)
+
+
+_DRAW = dict(bloon=_bloon, tower=_tower, ring=_ring, dart=_dart, dot=_dot, box=_box_outline, pointer=_pointer,
+             digit=_digit, options=_options, towerinfo=_towerinfo, start=_start, message=_message, banner=_banner)
+
+
+def _step(angle):
+    return int(round(angle / (2 * math.pi) * ANGLES)) % ANGLES
+
+
+# ---------------------------------------------------------------- what is on screen
+def draw_list(game, mouse=None):
+    """Every sprite on screen this frame, as three layers of (sprite, x, y), each bottom to top:
+
+      world   the map's contents - towers, bloons, darts, rings, the held tower;
+              the panel covers them, so they are cut off at its edge
+      boxes   the message box, the upgrade panel, tower info, Start Round, the
+              win/lose banner: they cover the world, and change only now and then
+      top     the panel's numbers and the pointer, over everything
+    """
+    world, boxes, top = [], [], []
+    sel = game.selected if game.selected in game.towers else None
+    if sel is not None:                                          # the selected tower sits at the bottom, ring showing
+        world.append((sprite(("ring", int(sel.range), (255, 255, 255), 2)), sel.x, sel.y))
     for t in game.towers:
-        _tower(d, t, selected=(t is game.selected))
+        world.append((sprite(("tower", t.kind, _step(t.angle), tuple(t.upgrades))), int(round(t.x)), int(round(t.y))))
     for b in game.bloons:
-        _bloon(d, b, game.frame)
+        x, y = b.pos
+        state = "popped" if b.popped else ("frozen" if b.frozen else "normal")
+        world.append((sprite(("bloon", b.kind, state)), int(round(x)), int(round(y))))
     for p in game.bullets:
         for hb, _ in p.boxes():
             if p.kind == "Bomb" and p.hit:
-                d.ellipse(hb, fill=None, outline=(255, 140, 30), width=3)
+                world.append((sprite(("box", int(hb[2] - hb[0]), int(hb[3] - hb[1]), (255, 140, 30), True)), int(round(hb[0])), int(round(hb[1]))))
             elif p.kind == "Bomb":
-                d.ellipse([p.x - 5, p.y - 5, p.x + 5, p.y + 5], fill=(30, 30, 30))
+                world.append((sprite(("dot", 5, (30, 30, 30))), int(round(p.x)), int(round(p.y))))
             elif p.kind == "Ice":
-                d.rectangle(hb, fill=None, outline=(170, 230, 255), width=2)
+                world.append((sprite(("box", int(hb[2] - hb[0]), int(hb[3] - hb[1]), (170, 230, 255), False)), int(round(hb[0])), int(round(hb[1]))))
             elif p.kind == "Tack":
-                cx, cy = (hb[0] + hb[2]) / 2, (hb[1] + hb[3]) / 2
-                d.ellipse([cx - 2, cy - 2, cx + 2, cy + 2], fill=(240, 240, 240))
+                world.append((sprite(("dot", 2, (240, 240, 240))), int(round((hb[0] + hb[2]) / 2)), int(round((hb[1] + hb[3]) / 2))))
             else:
-                d.line([p.x, p.y, p.x - math.cos(p.angle) * 10, p.y - math.sin(p.angle) * 10], fill=(60, 60, 60), width=3)
+                world.append((sprite(("dart", _step(p.angle))), int(round(p.x)), int(round(p.y))))
+    if mouse is not None and mouse.tool is not None:             # the tower being held, and its ring
+        red = not mouse.placeable
+        world.append((sprite(("ring", R.TOWERS[mouse.tool]["range"], (230, 30, 30) if red else (255, 255, 255), 2)), mouse.x, mouse.y))
+        world.append((sprite(("tower", mouse.tool, 0, (False,) * len(R.UPGRADES[mouse.tool]))), mouse.x, mouse.y))
 
-    # ---- the panel
-    d.rectangle([R.PANEL_X, 0, R.WIDTH, R.HEIGHT], fill=(60, 60, 60))
-    d.rounded_rectangle(R.PANEL, radius=8, fill=PANEL_BG, outline=PANEL_EDGE, width=3)
-    for label, y in R.TEXT_ROWS.items():
-        value = {"Round": game.current_round, "Money": game.money, "Lives": game.lives}[label]
-        d.text((R.PANEL[0] + 10, y - 10), f"{label}:", fill=TEXT, font=_FONT_BIG)
-        vw = d.textlength(str(value), font=_FONT_BIG)
-        d.text((R.PANEL[2] - 10 - vw, y - 10), str(value), fill=TEXT, font=_FONT_BIG)
-    d.text((R.PANEL[0] + 10, R.BUILD_LABEL_Y - 10), "Build Towers", fill=TEXT, font=_FONT_BIG)
-    d.line([R.PANEL[0] + 10, R.BUILD_LABEL_Y + 11, R.PANEL[2] - 10, R.BUILD_LABEL_Y + 11], fill=TEXT, width=2)
-    for kind, x in zip(R.TOWER_ORDER, R.TOWER_BUTTON_X):
-        r = R.TOWER_BUTTON_R
-        affordable = game.money >= R.TOWERS[kind]["cost"]
-        d.ellipse([x - r, R.TOWER_BUTTON_Y - r, x + r, R.TOWER_BUTTON_Y + r],
-                  fill=TOWER_COLOURS[kind] if affordable else (120, 120, 120), outline=(40, 40, 40), width=2)
-
-    t = game.selected
-    if t is not None and t in game.towers:
-        d.text((R.PANEL[0] + 10, R.UPGRADE_TITLE_Y - 9), f"{t.kind} Tower", fill=TEXT, font=_FONT)
-        d.text((R.PANEL[0] + 14, R.UPGRADE_SPEED_Y - 7), "Speed:", fill=TEXT, font=_FONT_SMALL)
-        d.text((R.PANEL[0] + 90, R.UPGRADE_SPEED_Y - 7), R.TOWERS[t.kind].get("speed", ""), fill=TEXT, font=_FONT_SMALL)
-        d.text((R.PANEL[0] + 14, R.UPGRADE_RANGE_Y - 7), "Range:", fill=TEXT, font=_FONT_SMALL)
-        d.text((R.PANEL[0] + 90, R.UPGRADE_RANGE_Y - 7), str(t.range), fill=TEXT, font=_FONT_SMALL)
-        for i, (name, cost, _) in enumerate(R.UPGRADES[t.kind]):
-            box = R.UPGRADE_BUTTONS[i]
-            bought = t.upgrades[i]
-            fill = (110, 110, 110) if bought else ((70, 150, 70) if game.money >= cost else (180, 70, 60))
-            d.rounded_rectangle(box, radius=5, fill=fill, outline=(60, 60, 60))
-            y = box[1] + 8
-            for word in name.split():
-                tw = d.textlength(word, font=_FONT_SMALL)
-                d.text(((box[0] + box[2]) / 2 - tw / 2, y), word, fill=(255, 255, 255), font=_FONT_SMALL); y += 14
-            tail = "Bought" if bought else ("Buy for:" if game.money >= cost else "Can't Afford")
-            for line in (tail, "" if bought else str(cost)):
-                tw = d.textlength(line, font=_FONT_SMALL)
-                d.text(((box[0] + box[2]) / 2 - tw / 2, y + 6), line, fill=(255, 255, 255), font=_FONT_SMALL); y += 14
-        _button(d, R.SELL_BUTTON, f"Sell for: {t.sell_value}", (190, 60, 50), _FONT_SMALL)
-
+    if sel is not None:
+        aff = tuple(game.money >= cost for _, cost, _ in R.UPGRADES[sel.kind])
+        boxes.append((sprite(("options", sel.kind, tuple(sel.upgrades), aff, sel.sell_value, int(sel.range))), 0, 0))
+    if mouse is not None and mouse.hover is not None:
+        boxes.append((sprite(("towerinfo", mouse.hover)), 0, 0))
     if not game.in_round and not game.over and not game.won:
-        _button(d, R.START_BUTTON, "Start Round", (90, 170, 90))
-        # the hint box
-        d.rounded_rectangle(R.HINT_BOX, radius=8, fill=(255, 255, 255), outline=(60, 60, 60))
-        words, lines, cur = game.hint.split(), [], ""
-        for w in words:
-            if d.textlength(cur + " " + w, font=_FONT_SMALL) > R.HINT_BOX[2] - R.HINT_BOX[0] - 16:
-                lines.append(cur); cur = w
-            else:
-                cur = (cur + " " + w).strip()
-        lines.append(cur)
-        for i, line in enumerate(lines[:4]):
-            d.text((R.HINT_BOX[0] + 8, R.HINT_BOX[1] + 8 + i * 16), line, fill=(20, 20, 20), font=_FONT_SMALL)
+        boxes.append((sprite(("start",)), 0, 0))
+    if game.message:
+        boxes.append((sprite(("message", game.message)), 0, 0))
     if game.over or game.won:
-        msg = "You Win!" if game.won else "Game Over"
-        tw = d.textlength(msg, font=_FONT_BIG)
-        d.rounded_rectangle([200, 200, 440, 260], radius=10, fill=(255, 255, 255), outline=(60, 60, 60))
-        d.text((320 - tw / 2, 218), msg, fill=(20, 20, 20), font=_FONT_BIG)
+        boxes.append((sprite(("banner", "You Win!" if game.won else "Game Over")), 0, 0))
 
-    if cursor is not None:                                # the mouse pointer
-        x, y = cursor
-        d.polygon([(x, y), (x + 12, y + 10), (x + 5, y + 11), (x + 8, y + 18), (x + 5, y + 19), (x + 2, y + 12), (x, y + 16)],
-                  fill=(255, 255, 255), outline=(0, 0, 0))
-    return im
+    for label, value in (("Round", max(game.current_round, 1)), ("Money", game.money), ("Lives", game.lives)):
+        text = str(value)                                        # right-aligned, digit by digit
+        x0, y0 = R.PANEL[2] - 10 - DIGIT_W * len(text), R.TEXT_ROWS[label] - 10
+        for i, ch in enumerate(text):
+            top.append((sprite(("digit", ch)), x0 + i * DIGIT_W, y0))
+    if mouse is not None:
+        top.append((sprite(("pointer",)), mouse.x, mouse.y))
+    return world, boxes, top
+
+
+# ---------------------------------------------------------------- two ways to look at it
+_BG_ARR = np.asarray(_BG).astype(np.float32)
+
+
+def _paste(img, items, right=R.WIDTH):
+    """Paste sprites into an (H, W, 3) image, in order, cut off at x = right."""
+    for s, x, y in items:
+        ys, xs = s.ys + (y - s.ay), s.xs + (x - s.ax)
+        on = (ys >= 0) & (ys < R.HEIGHT) & (xs >= 0) & (xs < right)
+        img[ys[on], xs[on]] = s.rgb01[on]
+
+
+def render(game, mouse=None):
+    """The whole screen as a PIL image."""
+    world, boxes, top = draw_list(game, mouse)
+    img = _BG_ARR / 255.0
+    _paste(img, world, right=R.PANEL_X)
+    _paste(img, boxes); _paste(img, top)
+    return Image.fromarray(np.rint(img * 255.0).astype(np.uint8))
+
+
+# every sprite the retina has pasted, in one flat store the compiled loop can index
+_STORE = dict(ys=np.zeros(1 << 16, np.int32), xs=np.zeros(1 << 16, np.int32),
+              rgb=np.zeros((1 << 16, 3), np.float32), used=0, where={})
+
+
+def _stored(s):
+    """(start, length) of a sprite's pixels in the store, adding it the first time."""
+    at = _STORE["where"].get(id(s))
+    if at is None:
+        n, used = len(s.ys), _STORE["used"]
+        while used + n > len(_STORE["ys"]):                    # grow by doubling
+            for k in ("ys", "xs", "rgb"):
+                a = _STORE[k]; _STORE[k] = np.concatenate([a, np.zeros_like(a)])
+        _STORE["ys"][used:used + n], _STORE["xs"][used:used + n], _STORE["rgb"][used:used + n] = s.ys, s.xs, s.rgb01
+        _STORE["used"] += n
+        at = _STORE["where"][id(s)] = (used, n)
+    return at
+
+
+@numba.njit(cache=True)
+def _column_sums(start, count, oy, ox, cut, s_ys, s_xs, s_rgb, canvas, base, covered, owner, stamp, frame_id, sums):
+    """Paste sprite k's pixels at (oy[k], ox[k]) in order - world pixels (cut[k])
+    only where no box or panel covers them - then add each pasted pixel's
+    change from the base picture to its column once, and put the base back."""
+    h, w = owner.shape
+    for k in range(start.shape[0]):
+        for i in range(start[k], start[k] + count[k]):
+            y, x = s_ys[i] + oy[k], s_xs[i] + ox[k]
+            if 0 <= y < h and 0 <= x < w and not (cut[k] and covered[y, x]):
+                canvas[y, x, 0] = s_rgb[i, 0]; canvas[y, x, 1] = s_rgb[i, 1]; canvas[y, x, 2] = s_rgb[i, 2]
+    for k in range(start.shape[0]):
+        for i in range(start[k], start[k] + count[k]):
+            y, x = s_ys[i] + oy[k], s_xs[i] + ox[k]
+            if 0 <= y < h and 0 <= x < w and stamp[y, x] != frame_id:
+                stamp[y, x] = frame_id
+                c = owner[y, x]
+                for j in range(3):
+                    sums[c, j] += canvas[y, x, j] - base[y, x, j]
+                    canvas[y, x, j] = base[y, x, j]
+
+
+class Retina:
+    """What each of the eye's columns sees: the mean colour of its patch of screen.
+
+    `owner` is (480, 640), the column each pixel belongs to (Eye.owner).
+    The result equals Eye.column_colours(np.asarray(render(game, mouse))).
+
+    The boxes change rarely, so the picture of background + boxes (the
+    base), its column sums, and the mask of what the boxes and the panel
+    cover are kept, and remade only when the boxes change.  Every frame,
+    only the world and the top layer are pasted over the base."""
+
+    def __init__(self, owner, n_columns):
+        self.n = n_columns
+        self.owner = np.ascontiguousarray(owner, dtype=np.int64)
+        self.counts = np.maximum(np.bincount(self.owner.ravel(), minlength=n_columns), 1).astype(np.float64)[:, None]
+        self.stamp = np.zeros(owner.shape, dtype=np.int64)
+        self.frame_id = 0
+        self._boxes_key = None
+
+    def _set_boxes(self, boxes):
+        base = _BG_ARR / 255.0
+        covered = np.zeros(self.owner.shape, dtype=np.bool_)
+        covered[:, R.PANEL_X:] = True
+        for s, x, y in boxes:
+            ys, xs = s.ys + (y - s.ay), s.xs + (x - s.ax)
+            on = (ys >= 0) & (ys < R.HEIGHT) & (xs >= 0) & (xs < R.WIDTH)
+            base[ys[on], xs[on]] = s.rgb01[on]; covered[ys[on], xs[on]] = True
+        self.base, self.canvas, self.covered = base, base.copy(), covered
+        own = self.owner.ravel()
+        self.base_sums = np.stack([np.bincount(own, weights=base[:, :, c].ravel(), minlength=self.n) for c in range(3)], axis=1)
+
+    def colours(self, game, mouse=None):
+        world, boxes, top = draw_list(game, mouse)
+        key = tuple((id(s), x, y) for s, x, y in boxes)
+        if key != self._boxes_key:
+            self._set_boxes(boxes); self._boxes_key = key
+        items = world + top
+        where = [_stored(s) for s, _, _ in items]
+        start = np.array([a for a, _ in where], dtype=np.int64); count = np.array([n for _, n in where], dtype=np.int64)
+        oy = np.array([y - s.ay for s, _, y in items], dtype=np.int64); ox = np.array([x - s.ax for s, x, _ in items], dtype=np.int64)
+        cut = np.zeros(len(items), dtype=np.bool_); cut[:len(world)] = True
+        sums = self.base_sums.copy()
+        self.frame_id += 1
+        _column_sums(start, count, oy, ox, cut, _STORE["ys"], _STORE["xs"], _STORE["rgb"],
+                     self.canvas, self.base, self.covered, self.owner, self.stamp, self.frame_id, sums)
+        return (sums / self.counts).astype(np.float32)
 
 
 if __name__ == "__main__":
-    from bloons.bot import ScriptedPlayer, best_spot
+    from bloons.bot import ScriptedPlayer
     from bloons.game import Game
+    from bloons.ui import Mouse
     import time
     g, bot = Game(), ScriptedPlayer()
     for _ in range(12):
@@ -194,6 +468,7 @@ if __name__ == "__main__":
     bot.act(g); g.start_round()
     for _ in range(700): g.step()
     g.selected = g.towers[0]
-    t0 = time.perf_counter(); im = render(g, cursor=(300, 250)); dt = time.perf_counter() - t0
+    m = Mouse(g); m.move(300, 250); m.tool = "Tack"
+    t0 = time.perf_counter(); im = render(g, m); dt = time.perf_counter() - t0
     im.save("data/bloons_frame.png")
     print(f"rendered in {dt*1000:.1f} ms -> data/bloons_frame.png  (round {g.current_round}, {len(g.bloons)} bloons)")

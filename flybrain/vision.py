@@ -244,7 +244,10 @@ class Eye:
 
     def currents(self, frame):
         """External current per neuron (zero except photoreceptors)."""
-        colours = self.column_colours(frame)
+        return self.currents_from(self.column_colours(frame))
+
+    def currents_from(self, colours):
+        """The same, from the mean colour each column sees (n_columns, 3), 0..1."""
         current = self.bias.copy()
         for kind, (idx, cols) in self.receptors.items():
             current[idx] = (colours[cols] @ SPECTRAL[kind]) * self.strength

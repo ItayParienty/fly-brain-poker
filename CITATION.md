@@ -38,3 +38,21 @@ Neurotransmitter predictions in the dataset are from:
   neurons encode valence and guide memory-based action selection.* eLife 3,
   e04580.
   — MBONs as opposing approach/avoid drives.
+
+## The eye
+
+The optic lobe's cell types and columns come from FlyWire's visual system
+atlas (Matsliah et al. 2024, *Neuronal parts list and wiring diagram for a
+visual system*, Nature 634, 166-180). Time constants, resting potentials and
+per-type synaptic strengths are taken from the published flyvis models:
+
+> Lappalainen, J. K., Tschopp, F. D., Prakhya, S., et al. (2024).
+> *Connectome-constrained networks predict neural activity across the fly
+> visual system.* Nature 634, 1132-1140.
+
+## The game
+
+Bloons Tower Defense is a game by Ninja Kiwi (2007). `bloons/` is an
+independent, non-commercial reimplementation for research; it is not
+affiliated with or endorsed by Ninja Kiwi. Its rules and geometry were read
+from the original game file, which is not included here.

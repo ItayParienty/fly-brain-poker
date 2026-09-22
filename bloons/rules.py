@@ -103,6 +103,11 @@ UPGRADE_TITLE_Y, UPGRADE_SPEED_Y, UPGRADE_RANGE_Y = 164, 180, 199
 UPGRADE_BUTTONS = [(486, 218, 551, 336), (559, 218, 624, 336)]
 SELL_BUTTON = (486, 356, 624, 384)
 HINT_BOX = (30, 393, 440, 470)                  # the between-rounds message
+# [G] placements on the main timeline: the tower-info box shown while the
+# pointer is over a tower button, and the two buttons under the panel
+TOWERINFO_BOX = (482, 159, 630, 300)
+RESTART_BUTTON = (571, 459, 629, 479)           # td.Init(): the whole game starts again
+MORE_GAMES_BUTTON = (476, 459, 565, 479)        # opens ninjakiwi.com; does nothing here
 MAP_RECT = (0, 0, PANEL_X, HEIGHT)
 
 # ---------------------------------------------------------------- rounds  [C] BuildLevels

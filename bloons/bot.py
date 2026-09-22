@@ -7,10 +7,13 @@ placing each tower on the free spot that covers the most track.
 
     python -m bloons.bot            # one game, round-by-round
 """
-import math
+import functools
 
+import numpy as np
+
+from bloons import original as O
 from bloons import rules as R
-from bloons.game import Game
+from bloons.game import Game, overlap, shifted
 from bloons.track import PATH_LENGTH, point_at
 
 # track sampled every 5 px, for measuring how much of it a spot covers
@@ -25,16 +28,24 @@ def coverage(x, y, rng):
     return 5 * sum(1 for px, py in _SAMPLES if (px - x) ** 2 + (py - y) ** 2 <= r2)
 
 
+@functools.lru_cache(maxsize=None)
+def _ranked(kind, rng):
+    """Grid spots clear of the track, most track covered first (ties in grid order).
+    The track never changes, so this is worked out once per tower kind and range."""
+    grid, samples = np.array(_GRID, dtype=float), np.array(_SAMPLES, dtype=float)
+    d2 = ((grid[:, None, :] - samples[None, :, :]) ** 2).sum(-1)
+    cover = 5 * (d2 <= rng * rng).sum(1)
+    clear = [i for i, (x, y) in enumerate(_GRID)
+             if not any(overlap(shifted(O.TOWER_BOX[kind], x, y), blk) for blk in O.PATH_BLOCKS)]
+    return [(_GRID[i], int(cover[i])) for i in sorted(clear, key=lambda i: (-cover[i], i))]
+
+
 def best_spot(game, kind, rng=None):
-    rng = rng or R.TOWERS[kind]["range"]
-    best, where = -1, None
-    for x, y in _GRID:
-        if not game.can_place(kind, x, y):
-            continue
-        c = coverage(x, y, rng)
-        if c > best:
-            best, where = c, (x, y)
-    return where, best
+    """The free spot covering the most track: the first of the ranked spots that is not taken."""
+    for where, c in _ranked(kind, rng or R.TOWERS[kind]["range"]):
+        if game.can_place(kind, *where):
+            return where, c
+    return None, -1
 
 
 # what to buy, in order.  ("Dart",) places a tower; ("up", "Dart", 0) buys

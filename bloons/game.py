@@ -168,12 +168,17 @@ class Bullet:
 class Game:
     def __init__(self, seed=0):
         self.rng = random.Random(seed)
+        self.reset()
+
+    def reset(self):
+        """A new game (the Restart button); the random stream carries on."""
         self.money, self.lives = R.START_MONEY, R.START_LIVES
         self.round_no = 0                       # rounds completed
         self.in_round = False
         self.frame = 0                          # frames since the game began
         self.bloons, self.towers, self.bullets = [], [], []
         self.hint = "Press Start Round to begin."
+        self.message = self.hint                # the message box under the map (None = hidden)
         self.selected = None                    # a Tower, for the upgrade panel
         self._next_id = 0
         self.stats = dict(pops=0, leaks=0)
@@ -238,6 +243,7 @@ class Game:
         self._interval = R.spawn_interval(level)
         self._counter, self._no_more, self._end_wait = 0, False, 0
         self.in_round = True
+        self.message = None                     # StartLevel draws the message box off
         return True
 
     def _finish_round(self):
@@ -249,6 +255,7 @@ class Game:
             self.money += bonus
             hint = R.ROUND_TABLE[self.round_no][2]        # the hint shown after round n is the next round's
             self.hint = f"Round {self.round_no} passed. {bonus} money awarded. {hint}".strip()
+            self.message = self.hint
 
     def _spawn(self, kind, frame=0, ox=None, oy=None):
         if ox is None:

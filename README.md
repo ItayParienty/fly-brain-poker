@@ -153,6 +153,95 @@ keep learning while they play and their synapses are saved between runs.
   fly. It is given perception; what it would have to learn is what to do
   about it.
 
+## Part two, in progress: an eye, a mouse, and Bloons Tower Defense 1
+
+The cards hand the fly its perception. The second half of the project takes
+that away: the fly gets one optic lobe of the connectome, a screen, and a
+mouse, and the game is Bloons Tower Defense 1 (Ninja Kiwi, 2007). Nothing
+about the game reaches the fly except through its photoreceptors.
+
+**The game** (`bloons/`) is a headless, frame-exact reimplementation. Tower
+stats, all 50 rounds, spawn timing, hit boxes and the bloons' paths — frame
+by frame — are read from the original's decompiled ActionScript and
+geometry (`bloons/extract_original.py`, run on a copy of the game you
+supply; it is not in this repo). Against the original running in a browser,
+one Dart tower at the same spot leaks 1 bloon in round 1 and 8 in round 2 in
+both. The mouse behaves as the original's does, down to the tower-info box
+on hover and the "Can't Afford" cover that swallows a press
+(`bloons/ui.py`). Simple strategies give it a real difficulty gradient
+(`bloons/strategies.py`): each buys whenever it can and puts every
+tower where it covers the most track; three seeds each.
+
+| strategy | outcome |
+|---|---|
+| Darts only | lost in rounds 11, 13, 13 |
+| Darts, and every upgrade as soon as affordable | lost in rounds 10–12 |
+| Tacks, and every upgrade as soon as affordable | lost in rounds 5–6 |
+| Darts with Piercing | won once (13 lives), lost in rounds 13 and 22 |
+| the scripted build order in `bloons/bot.py` | won all three, with 6–16 lives |
+| **Tacks only** | **won all three, with 11–13 lives** |
+| Dart and Tack in turn, with Piercing | won all three, with 10–24 lives |
+
+Winning does not take a clever plan. It takes one kind of tower, placed well,
+bought the moment it is affordable — which is exactly what a player who can
+see and point quickly can do.
+
+**The eye** (`flybrain/vision.py`, `flybrain/flyvis_eye.py`) is FlyWire's
+right optic lobe — 48,882 neurons once the giant CT1 cell is split into its
+per-column compartments. FlyWire's atlas places each columnar neuron in one
+of the 796 columns of the eye's hexagonal lattice, so every neuron's patch of
+the visual field is known; the screen is fitted to that lattice and light
+enters at the photoreceptors. The connectome has no time constants or
+resting potentials, so those, and a strength per pair of cell types, come
+from the published flyvis model (Lappalainen et al. 2024). What the eye does
+(`flybrain/verify_vision.py`):
+
+| | |
+|---|---|
+| ON and OFF pathways | Mi1 and Tm3 rise with light, Tm1 and Tm9 fall — as in the fly |
+| an object's position, decoded from L1 + L2 | to 21 px (chance ~180 px) |
+| direction selectivity in T4/T5 | absent: DSI ≤ 0.09, every subtype the same direction |
+| looming responses in LPLC2/LC4 | absent |
+
+The last two fail although FlyWire's T4 inputs are offset by subtype exactly
+as the literature describes — Mi9 on one side, Mi4 and C3 on the other. The
+wiring for motion is there; the dynamics are not. flyvis's parameters were
+fitted together with its own averaged lattice and do not carry over to
+individual cells.
+
+**The hands** (`flybrain/motor.py`, `bloons/fly_player.py`). Three read-outs,
+each one weight per cell type and none tied to a place on the screen: the
+**gaze** is a salience map over the 796 columns, and the pointer jumps to its
+peak in one 12.5 ms step however far that is; the **proboscis** presses when a
+sum over the fixated spot crosses zero; a **wing beat** presses Start Round. The
+whole loop — screen, photoreceptors, optic lobe, pointer, game — runs at
+~220 frames/s for one fly, 5.5× real time. The eye is fed by a sprite
+compositor that computes each column's mean colour directly, identical to
+rendering the frame and ~100× cheaper (`bloons/screen.py`).
+
+Taught only what a bloon looks like — one weight per cell type, fitted by
+regression while the fly watched one game (`bloons/watch.py`) — the fly keeps
+its pointer on a bloon in 76% of frames of another game, against 14% for a
+random spot. A bloon appearing on the track moves the lamina within 50 ms,
+the medulla within 60–75 ms and the gaze map within 62 ms, so the fly's
+reaction time is set by its eye rather than by moving a mouse. A lone bloon
+on a still screen, though, is often outshone by other high-contrast
+things — text above all.
+
+**Is the optic lobe doing the seeing?** Not yet, as far as this measures
+(`bloons/eye_vs_pixels.py`). Trained to find bloons, the same read-out does
+this well from the optic lobe and from the raw photoreceptors of a
+19-column patch:
+
+| read-out | optic lobe | photoreceptors |
+|---|---|---|
+| one weight per feature | 65% | 58% |
+| a small network shared by all columns | 94% | 97% |
+
+The optic lobe's features help a read-out that cannot compute on its own,
+and a read-out that can compute does not need them. Whatever the fly
+achieves in the game will be measured against the same controls.
+
 ## Running it
 
 ```bash
@@ -169,6 +258,12 @@ python -m cards.innate                # measured wiring vs randomised (poker)
 python -m cards.experiment            # real vs random-sign reward (poker)
 python -m cards.blackjack_experiment  # the same, for blackjack
 python -m cards.conditioning          # classic odour conditioning, as a positive control
+
+python -m bloons.game                 # the clone against the original: leaks with one Dart tower
+python -m bloons.strategies           # simple strategies over all 50 rounds
+python -m flybrain.verify_vision      # what the eye does: ON/OFF, objects, position, motion, looming
+python -m bloons.watch                # the closed loop: aim, reaction time, speed, and a video
+python -m bloons.eye_vs_pixels        # does the optic lobe help find bloons, or would pixels do?
 ```
 
 Smaller pieces, worth reading first:
@@ -182,12 +277,15 @@ python -m cards.blackjack             # basic strategy vs mimic-the-dealer vs al
 ## Layout
 
 ```
-flybrain/   the brain: FlyWire download, circuit, spiking simulation, plasticity rule, checks
+flybrain/   the brain: FlyWire download, circuits, simulations, plasticity rule, the eye, the read-outs, checks
 cards/      poker, blackjack, and the 3D table
+bloons/     Bloons Tower Defense 1: the clone, its screen and mouse, and the fly that plays it
 data/       FlyWire files and caches (not committed)
 ```
 
 ## Data
 
 Not included here. `download_data.py` fetches the public FlyWire v783 snapshot.
-See [CITATION.md](CITATION.md) — CC BY-NC-SA 4.0, non-commercial.
+See [CITATION.md](CITATION.md) — CC BY-NC-SA 4.0, non-commercial. Bloons Tower
+Defense is Ninja Kiwi's; the clone is an independent research reimplementation,
+and the original game file is not included.
