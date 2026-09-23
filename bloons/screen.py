@@ -80,9 +80,18 @@ def _background():
         x, y = point_at(s)
         d.ellipse([x - 2, y - 2, x + 2, y + 2], fill=STONE_EDGE)
         s += 40
-    # the panel
+    # the panel's backing; what is written and drawn on it is _panel_front(), which the
+    # original puts above the towers, bloons and darts, and the backing below them
     d.rectangle([R.PANEL_X, 0, R.WIDTH, R.HEIGHT], fill=(60, 60, 60))
     d.rounded_rectangle(R.PANEL, radius=8, fill=PANEL_BG, outline=PANEL_EDGE, width=3)
+    return im
+
+
+def _panel_front():
+    """Labels, tower buttons and the two buttons under the panel, on a clear sheet
+    (drawn over the panel's colour, so their edges blend as they would on it)."""
+    im = Image.new("RGBA", (R.WIDTH, R.HEIGHT), PANEL_BG + (0,))
+    d = ImageDraw.Draw(im)
     for label, y in R.TEXT_ROWS.items():
         d.text((R.PANEL[0] + 10, y - 10), f"{label}:", fill=TEXT, font=_FONT_BIG)
     d.text((R.PANEL[0] + 10, R.BUILD_LABEL_Y - 10), "Build Towers", fill=TEXT, font=_FONT_BIG)
@@ -94,7 +103,7 @@ def _background():
         d.rounded_rectangle(box, radius=9, fill=(200, 215, 200), outline=(40, 40, 40))
         tw = d.textlength(text, font=_FONT_SMALL)
         d.text(((box[0] + box[2]) / 2 - tw / 2, box[1] + 3), text, fill=(20, 20, 20), font=_FONT_SMALL)
-    return im
+    return Sprite(im, 0, 0)
 
 
 _BG = _background()
@@ -279,7 +288,7 @@ def _banner(text):
     return Sprite(im, -200, -200)
 
 
-_DRAW = dict(bloon=_bloon, tower=_tower, ring=_ring, dart=_dart, dot=_dot, box=_box_outline, pointer=_pointer,
+_DRAW = dict(panel=_panel_front, bloon=_bloon, tower=_tower, ring=_ring, dart=_dart, dot=_dot, box=_box_outline, pointer=_pointer,
              digit=_digit, options=_options, towerinfo=_towerinfo, start=_start, message=_message, banner=_banner)
 
 
@@ -291,18 +300,15 @@ def _step(angle):
 def draw_list(game, mouse=None):
     """Every sprite on screen this frame, as three layers of (sprite, x, y), each bottom to top:
 
-      world   the map's contents - towers, bloons, darts, rings, the held tower;
-              the panel covers them, so they are cut off at its edge
-      boxes   the message box, the upgrade panel, tower info, Start Round, the
-              win/lose banner: they cover the world, and change only now and then
+      world   bloons, darts, towers, rings and the held tower - in the original's
+              order, over the map and the panel's backing
+      boxes   the panel's labels and buttons, the upgrade panel, tower info,
+              Start Round, the message box, the win/lose banner: they cover the
+              world, and change only now and then
       top     the panel's numbers and the pointer, over everything
     """
     world, boxes, top = [], [], []
     sel = game.selected if game.selected in game.towers else None
-    if sel is not None:                                          # the selected tower sits at the bottom, ring showing
-        world.append((sprite(("ring", int(sel.range), (255, 255, 255), 2)), sel.x, sel.y))
-    for t in game.towers:
-        world.append((sprite(("tower", t.kind, _step(t.angle), tuple(t.upgrades))), int(round(t.x)), int(round(t.y))))
     for b in game.bloons:
         x, y = b.pos
         state = "popped" if b.popped else ("frozen" if b.frozen else "normal")
@@ -319,11 +325,16 @@ def draw_list(game, mouse=None):
                 world.append((sprite(("dot", 2, (240, 240, 240))), int(round((hb[0] + hb[2]) / 2)), int(round((hb[1] + hb[3]) / 2))))
             else:
                 world.append((sprite(("dart", _step(p.angle))), int(round(p.x)), int(round(p.y))))
+    if sel is not None:                                          # the selected tower goes to the bottom, ring showing
+        world.append((sprite(("ring", int(sel.range), (255, 255, 255), 2)), sel.x, sel.y))
+    for t in ([sel] if sel is not None else []) + [t for t in game.towers if t is not sel]:
+        world.append((sprite(("tower", t.kind, _step(t.angle), tuple(t.upgrades))), int(round(t.x)), int(round(t.y))))
     if mouse is not None and mouse.tool is not None:             # the tower being held, and its ring
         red = not mouse.placeable
         world.append((sprite(("ring", R.TOWERS[mouse.tool]["range"], (230, 30, 30) if red else (255, 255, 255), 2)), mouse.x, mouse.y))
         world.append((sprite(("tower", mouse.tool, 0, (False,) * len(R.UPGRADES[mouse.tool]))), mouse.x, mouse.y))
 
+    boxes.append((sprite(("panel",)), 0, 0))
     if sel is not None:
         aff = tuple(game.money >= cost for _, cost, _ in R.UPGRADES[sel.kind])
         boxes.append((sprite(("options", sel.kind, tuple(sel.upgrades), aff, sel.sell_value, int(sel.range))), 0, 0))
@@ -350,11 +361,11 @@ def draw_list(game, mouse=None):
 _BG_ARR = np.asarray(_BG).astype(np.float32)
 
 
-def _paste(img, items, right=R.WIDTH):
-    """Paste sprites into an (H, W, 3) image, in order, cut off at x = right."""
+def _paste(img, items):
+    """Paste sprites into an (H, W, 3) image, in order."""
     for s, x, y in items:
         ys, xs = s.ys + (y - s.ay), s.xs + (x - s.ax)
-        on = (ys >= 0) & (ys < R.HEIGHT) & (xs >= 0) & (xs < right)
+        on = (ys >= 0) & (ys < R.HEIGHT) & (xs >= 0) & (xs < R.WIDTH)
         img[ys[on], xs[on]] = s.rgb01[on]
 
 
@@ -362,7 +373,7 @@ def render(game, mouse=None):
     """The whole screen as a PIL image."""
     world, boxes, top = draw_list(game, mouse)
     img = _BG_ARR / 255.0
-    _paste(img, world, right=R.PANEL_X)
+    _paste(img, world)
     _paste(img, boxes); _paste(img, top)
     return Image.fromarray(np.rint(img * 255.0).astype(np.uint8))
 
@@ -387,25 +398,25 @@ def _stored(s):
 
 
 @numba.njit(cache=True)
-def _column_sums(start, count, oy, ox, cut, s_ys, s_xs, s_rgb, canvas, base, covered, owner, stamp, frame_id, sums):
-    """Paste sprite k's pixels at (oy[k], ox[k]) in order - world pixels (cut[k])
-    only where no box or panel covers them - then add each pasted pixel's
-    change from the base picture to its column once, and put the base back."""
+def _column_sums(start, count, oy, ox, cut, s_ys, s_xs, s_rgb, canvas, base, covered, owner, written, counted, frame_id, sums):
+    """Paste sprite k's pixels at (oy[k], ox[k]) in order into a scratch canvas -
+    world pixels (cut[k]) only where no box covers them - then add each pasted
+    pixel's change from the base picture to its column, once."""
     h, w = owner.shape
     for k in range(start.shape[0]):
         for i in range(start[k], start[k] + count[k]):
             y, x = s_ys[i] + oy[k], s_xs[i] + ox[k]
             if 0 <= y < h and 0 <= x < w and not (cut[k] and covered[y, x]):
                 canvas[y, x, 0] = s_rgb[i, 0]; canvas[y, x, 1] = s_rgb[i, 1]; canvas[y, x, 2] = s_rgb[i, 2]
+                written[y, x] = frame_id
     for k in range(start.shape[0]):
         for i in range(start[k], start[k] + count[k]):
             y, x = s_ys[i] + oy[k], s_xs[i] + ox[k]
-            if 0 <= y < h and 0 <= x < w and stamp[y, x] != frame_id:
-                stamp[y, x] = frame_id
+            if 0 <= y < h and 0 <= x < w and written[y, x] == frame_id and counted[y, x] != frame_id:
+                counted[y, x] = frame_id
                 c = owner[y, x]
                 for j in range(3):
                     sums[c, j] += canvas[y, x, j] - base[y, x, j]
-                    canvas[y, x, j] = base[y, x, j]
 
 
 class Retina:
@@ -414,45 +425,61 @@ class Retina:
     `owner` is (480, 640), the column each pixel belongs to (Eye.owner).
     The result equals Eye.column_colours(np.asarray(render(game, mouse))).
 
-    The boxes change rarely, so the picture of background + boxes (the
-    base), its column sums, and the mask of what the boxes and the panel
-    cover are kept, and remade only when the boxes change.  Every frame,
-    only the world and the top layer are pasted over the base."""
+    The boxes change rarely and cycle through a few states (a button hovered
+    or not, the message box up or not), so for each state the picture of
+    background + boxes (the base), its column sums and the mask of what the
+    boxes cover are kept.  Every frame only the world and the top layer are
+    pasted, into a scratch canvas, and their difference from the base added."""
+
+    KEEP = 12                                               # box states remembered
 
     def __init__(self, owner, n_columns):
+        from collections import OrderedDict
         self.n = n_columns
         self.owner = np.ascontiguousarray(owner, dtype=np.int64)
         self.counts = np.maximum(np.bincount(self.owner.ravel(), minlength=n_columns), 1).astype(np.float64)[:, None]
-        self.stamp = np.zeros(owner.shape, dtype=np.int64)
+        self.canvas = np.zeros(owner.shape + (3,), dtype=np.float32)
+        self.written = np.zeros(owner.shape, dtype=np.int64)
+        self.counted = np.zeros(owner.shape, dtype=np.int64)
         self.frame_id = 0
-        self._boxes_key = None
+        self.bg = _BG_ARR / 255.0
+        self.bg_sums = np.stack([np.bincount(self.owner.ravel(), weights=self.bg[:, :, c].ravel(), minlength=self.n)
+                                 for c in range(3)], axis=1)
+        self._states = OrderedDict()
 
-    def _set_boxes(self, boxes):
-        base = _BG_ARR / 255.0
+    def _boxes(self, boxes):
+        key = tuple((id(s), x, y) for s, x, y in boxes)
+        state = self._states.get(key)
+        if state is not None:
+            self._states.move_to_end(key)
+            return state
+        base = self.bg.copy()
         covered = np.zeros(self.owner.shape, dtype=np.bool_)
-        covered[:, R.PANEL_X:] = True
         for s, x, y in boxes:
             ys, xs = s.ys + (y - s.ay), s.xs + (x - s.ax)
             on = (ys >= 0) & (ys < R.HEIGHT) & (xs >= 0) & (xs < R.WIDTH)
             base[ys[on], xs[on]] = s.rgb01[on]; covered[ys[on], xs[on]] = True
-        self.base, self.canvas, self.covered = base, base.copy(), covered
-        own = self.owner.ravel()
-        self.base_sums = np.stack([np.bincount(own, weights=base[:, :, c].ravel(), minlength=self.n) for c in range(3)], axis=1)
+        px = np.flatnonzero(covered)
+        delta = (base - self.bg).reshape(-1, 3)[px]
+        own = self.owner.ravel()[px]
+        sums = self.bg_sums + np.stack([np.bincount(own, weights=delta[:, c], minlength=self.n) for c in range(3)], axis=1)
+        state = self._states[key] = (base, covered, sums)
+        if len(self._states) > self.KEEP:
+            self._states.popitem(last=False)
+        return state
 
     def colours(self, game, mouse=None):
         world, boxes, top = draw_list(game, mouse)
-        key = tuple((id(s), x, y) for s, x, y in boxes)
-        if key != self._boxes_key:
-            self._set_boxes(boxes); self._boxes_key = key
+        base, covered, base_sums = self._boxes(boxes)
         items = world + top
         where = [_stored(s) for s, _, _ in items]
         start = np.array([a for a, _ in where], dtype=np.int64); count = np.array([n for _, n in where], dtype=np.int64)
         oy = np.array([y - s.ay for s, _, y in items], dtype=np.int64); ox = np.array([x - s.ax for s, x, _ in items], dtype=np.int64)
         cut = np.zeros(len(items), dtype=np.bool_); cut[:len(world)] = True
-        sums = self.base_sums.copy()
+        sums = base_sums.copy()
         self.frame_id += 1
         _column_sums(start, count, oy, ox, cut, _STORE["ys"], _STORE["xs"], _STORE["rgb"],
-                     self.canvas, self.base, self.covered, self.owner, self.stamp, self.frame_id, sums)
+                     self.canvas, base, covered, self.owner, self.written, self.counted, self.frame_id, sums)
         return (sums / self.counts).astype(np.float32)
 
 

@@ -19,10 +19,11 @@ something its optic lobe responds to.
   wings   a sum over the whole eye.  Above zero, the wings beat - which
           starts the next round.
 
-Two rules shape the gaze.  It stays where it is unless another column
-beats it by `hold` (flies fixate, then saccade).  And a spot the fly has
-just pressed loses `habituation` of its salience, recovering over 1.5 s,
-so the gaze moves on instead of pressing the same button forever.
+Three rules shape the gaze.  It stays where it is unless another column
+beats it by `hold` (flies fixate, then saccade).  A spot the fly has just
+pressed loses `habituation` of its salience, and a spot it keeps looking at
+loses `fatigue` per step; both recover over 1.5 s.  So the gaze moves on,
+instead of pressing the same button forever or staring at one spot.
 
     motor = Motor(circuit, eye, n_agents, rest=resting_output(net, eye))
     motor.set(params)                    # weights per fly, see random_params()
@@ -77,6 +78,10 @@ class Motor:
         a = sparse.csr_matrix((1.0 / per_bin[rows], (rows, cols)), shape=(T * K, circuit.n_neurons))
         self.pool = _torch_csr(a, self.device)                 # (T*K, N): mean activity per type and column
         self.present = torch.as_tensor((per_bin > 0).reshape(T, K), device=self.device)
+        # the same pooling with the type folded out, for the read-outs: (K, N), and each neuron's type
+        self._column_pool = _torch_csr(sparse.csr_matrix((1.0 / per_bin[rows], (rows % K, cols)), shape=(K, circuit.n_neurons)), self.device)
+        type_of = np.full(circuit.n_neurons, T, dtype=np.int64); type_of[cols] = rows // K
+        self._type_of = torch.as_tensor(type_of, device=self.device)
         # the hexagonal neighbourhood: a column and the (up to) six around it
         xy = circuit.columns_xy
         pairs = cKDTree(xy).query_pairs(1.1, output_type="ndarray")
@@ -108,6 +113,7 @@ class Motor:
             s += m.sum((1, 2)); s2 += (m ** 2).sum((1, 2)); n += self.present.sum(1) * m.shape[2]
         self.mean = s / n
         self.scale = (s2 / n - self.mean ** 2).clamp_min(1e-8).sqrt()
+        self._refold()
 
     def save_normalisation(self, path=DATA_DIR / "motor_norm.npz"):
         np.savez(path, types=np.array(self.types), mean=self.mean.cpu().numpy(), scale=self.scale.cpu().numpy())
@@ -117,14 +123,25 @@ class Motor:
         assert list(b["types"]) == self.types, "normalisation was fitted for other cell types"
         self.mean = torch.as_tensor(b["mean"], device=self.device)
         self.scale = torch.as_tensor(b["scale"], device=self.device)
+        self._refold()
+
+    def _refold(self):
+        if self.params is not None:                         # the weights carry the normalisation: redo them
+            self.set({k: v.cpu().numpy() for k, v in self.params.items()})
 
     # ------------------------------------------------ weights
     def set(self, params):
         """params: dict of arrays with a leading fly axis -
         gaze (A, T), press (A, T), press_bias (A,), wings (A, T), wings_bias (A,),
-        and optionally hold (A,) and habituation (A,)."""
-        params = dict(dict(hold=np.full(self.n_agents, 0.25), habituation=np.full(self.n_agents, 4.0)), **params)
+        and optionally hold (A,), habituation (A,) and fatigue (A,)."""
+        A = self.n_agents
+        params = dict(dict(hold=np.full(A, 0.25), habituation=np.full(A, 4.0), fatigue=np.zeros(A)), **params)
         self.params = {k: torch.as_tensor(np.asarray(v, dtype=np.float32), device=self.device) for k, v in params.items()}
+        # fold the normalisation into the weights: per neuron w / scale, and a per-column offset
+        w = torch.stack([self.params[k] for k in ("gaze", "press", "wings")])              # (3, A, T)
+        per_type = torch.cat([w / self.scale, torch.zeros_like(w[:, :, :1])], 2)            # a zero for unread neurons
+        self._neuron_w = per_type.permute(2, 0, 1).reshape(self.n_types + 1, 3 * A)[self._type_of]   # (N, 3A)
+        self._offset = self.present.T.float() @ (w * (self.mean / self.scale)).permute(2, 0, 1).reshape(self.n_types, 3 * A)
 
     def random_params(self, rng, scale=0.3):
         A, T = self.n_agents, self.n_types
@@ -139,23 +156,30 @@ class Motor:
         self.refractory = torch.zeros(A, dtype=torch.long, device=self.device)
         self.salience = torch.zeros((K, A), device=self.device)
 
+    def sums(self, rate):
+        """The three weighted sums in every column, (3, K, A): gaze, press and wings -
+        sum over types of weight x maps(rate), computed without building the maps."""
+        A = self.n_agents
+        x = (rate - self.rest[:, None]).repeat(1, 3) * self._neuron_w                     # (N, 3A)
+        return (torch.sparse.mm(self._column_pool, x) - self._offset).view(-1, 3, A).permute(1, 0, 2)
+
     def step(self, rate):
         """One brain step. rate: (N, A). Returns numpy (gaze column, press, wings) per fly."""
         p, ar = self.params, torch.arange(self.n_agents, device=self.device)
-        m = self.maps(rate)                                                    # (T, K, A)
-        sal = self.near @ torch.einsum("tka,at->ka", m, p["gaze"])             # (K, A)
-        sal = sal - self.habituation
+        gaze_sum, press_sum, wings_sum = self.sums(rate)                        # each (K, A)
+        sal = self.near @ gaze_sum - self.habituation
         best = sal.argmax(0)
         move = sal[best, ar] > sal[self.fixation, ar] + p["hold"]
         self.fixation = torch.where(move, best, self.fixation)
-        fovea = self.near[self.fixation]                                       # (A, K)
-        look = torch.einsum("ak,tka->at", fovea, m)                            # (A, T): what is being looked at
-        press = ((look * p["press"]).sum(1) + p["press_bias"] > 0) & (self.refractory == 0)
-        wings = (m.mean(1).T * p["wings"]).sum(1) + p["wings_bias"] > 0
+        fovea = self.near[self.fixation]                                       # (A, K): what is being looked at
+        press = ((fovea * press_sum.T).sum(1) + p["press_bias"] > 0) & (self.refractory == 0)
+        wings = wings_sum.mean(0) + p["wings_bias"] > 0
         self.refractory = torch.where(press, torch.full_like(self.refractory, PRESS_REFRACTORY), (self.refractory - 1).clamp_min(0))
-        self.habituation = self.habituation * float(np.exp(-self.dt / HABITUATION_TAU)) + p["habituation"][None, :] * fovea.T * press[None, :]
+        self.habituation = (self.habituation * float(np.exp(-self.dt / HABITUATION_TAU))
+                            + fovea.T * (p["habituation"] * press + p["fatigue"])[None, :])
         self.salience = sal
-        return self.fixation.cpu().numpy(), press.cpu().numpy(), wings.cpu().numpy()
+        out = torch.stack([self.fixation, press.long(), wings.long()]).cpu().numpy()        # one trip to the CPU
+        return out[0], out[1].astype(bool), out[2].astype(bool)
 
     def pointer(self, column):
         """Screen position of a column: where the pointer goes when the fly looks there."""

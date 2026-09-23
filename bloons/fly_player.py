@@ -32,6 +32,26 @@ from flybrain.vision import SPECTRAL
 STEPS_PER_FRAME = 2
 
 
+class Photoreceptors:
+    """Column colours of many flies -> photoreceptor currents, on the GPU."""
+
+    def __init__(self, eye, n_neurons, device):
+        idx, cols, spec = [], [], []
+        for kind, (i, c) in eye.receptors.items():
+            idx.append(i); cols.append(c); spec.append(np.repeat(SPECTRAL[kind][None], len(i), 0) * eye.strength)
+        self.idx = torch.as_tensor(np.concatenate(idx), device=device)
+        self.col = torch.as_tensor(np.concatenate(cols), device=device)
+        self.spec = torch.as_tensor(np.concatenate(spec), device=device)            # (receptors, 3)
+        self.n_neurons, self.device = n_neurons, device
+
+    def currents(self, colours):
+        """colours: (A, K, 3) numpy -> (N, A) current, zero except at the photoreceptors."""
+        col = torch.as_tensor(colours, device=self.device)
+        cur = torch.zeros((self.n_neurons, col.shape[0]), device=self.device)
+        cur[self.idx] = (col[:, self.col, :] * self.spec[None]).sum(2).T
+        return cur
+
+
 class Arena:
     def __init__(self, circuit, eye, net, motor, seeds, games=None):
         self.circuit, self.eye, self.motor = circuit, eye, motor
@@ -42,13 +62,7 @@ class Arena:
         self.retinas = [Retina(eye.owner, circuit.n_columns) for _ in range(self.n)]
         self.net = FlyvisNetwork(circuit.weights, eye.dyn, n_agents=self.n, dt=net.dt, device=net.device)
         self.net.bias = net.bias.clone(); self.net.reset()
-        dev = self.net.device
-        idx, cols, spec = [], [], []
-        for kind, (i, c) in eye.receptors.items():
-            idx.append(i); cols.append(c); spec.append(np.repeat(SPECTRAL[kind][None], len(i), 0) * eye.strength)
-        self.r_idx = torch.as_tensor(np.concatenate(idx), device=dev)
-        self.r_col = torch.as_tensor(np.concatenate(cols), device=dev)
-        self.r_spec = torch.as_tensor(np.concatenate(spec), device=dev)            # (receptors, 3)
+        self.photoreceptors = Photoreceptors(eye, self.net.n_neurons, self.net.device)
         self.frame_no = 0
         self.log = [[] for _ in range(self.n)]                                   # (frame, step, event) per fly
         self.control = np.ones(self.n, dtype=bool)                              # False: the fly only watches
@@ -57,12 +71,7 @@ class Arena:
         return np.stack([r.colours(g, m) for r, g, m in zip(self.retinas, self.games, self.mice)])   # (A, K, 3)
 
     def currents(self, colours):
-        """Photoreceptor currents on the GPU from the column colours of every fly."""
-        col = torch.as_tensor(colours, device=self.net.device)                  # (A, K, 3)
-        drive = (col[:, self.r_col, :] * self.r_spec[None]).sum(2)              # (A, receptors)
-        cur = torch.zeros((self.net.n_neurons, self.n), device=self.net.device)
-        cur[self.r_idx] = drive.T
-        return cur
+        return self.photoreceptors.currents(colours)
 
     def frame(self, colours=None):
         """One game frame for every fly. Returns the column colours the flies saw."""
