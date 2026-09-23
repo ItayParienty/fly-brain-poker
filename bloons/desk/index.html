@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>Fly at the Desk</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #06070b; --glass: rgba(12, 14, 22, 0.66); --glass-line: rgba(255, 255, 255, 0.08);
+    --text: #eef0f5; --muted: #8b93a7; --gold: #e2c56b; --good: #6ff0a8; --bad: #ff6d7a; --eye: #ff5a4a; --cyan: #5adcff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); overflow: hidden;
+    font-family: "Heebo", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; font-size: 14px; }
+  #scene { position: fixed; inset: 0; }
+  canvas { display: block; }
+  .glass { background: var(--glass); border: 1px solid var(--glass-line); border-radius: 14px;
+    backdrop-filter: blur(14px) saturate(140%); -webkit-backdrop-filter: blur(14px) saturate(140%);
+    box-shadow: 0 10px 40px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.05); }
+
+  #top { position: fixed; top: 14px; right: 16px; left: 16px; display: flex; gap: 12px; align-items: center; pointer-events: none; }
+  #top > * { pointer-events: auto; }
+  #title { padding: 8px 14px; font-weight: 800; font-size: 15px; white-space: nowrap; }
+  #title small { color: var(--muted); font-weight: 300; margin-inline-start: 10px; font-size: 12px; }
+  #title .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--eye);
+    margin-inline-end: 8px; box-shadow: 0 0 10px var(--eye); vertical-align: middle; }
+  #spacer { flex: 1; }
+  #stats { display: flex; gap: 2px; padding: 4px; }
+  .stat { padding: 4px 12px; text-align: center; min-width: 64px; }
+  .stat .v { font-size: 18px; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .stat .k { font-size: 11px; color: var(--muted); font-weight: 300; }
+  .stat.lives .v { color: var(--good); } .stat.lives.low .v { color: var(--bad); }
+  .stat.money .v { color: var(--gold); }
+  #gen { padding: 8px 14px; color: var(--muted); font-weight: 300; white-space: nowrap; }
+  #gen b { color: var(--text); font-weight: 600; }
+
+  #eye-panel { position: fixed; top: 76px; left: 16px; width: 352px; padding: 12px 14px 10px; max-height: calc(100vh - 92px); overflow: hidden; }
+  #eye-panel h3 { margin: 2px 0 6px; font-size: 13px; font-weight: 800; display: flex; justify-content: space-between; align-items: baseline; }
+  #eye-panel h3 span { color: var(--muted); font-weight: 300; font-size: 11px; }
+  #eye-panel canvas { width: 320px; height: 240px; border-radius: 8px; background: #000; image-rendering: pixelated; }
+  #eye-panel .legend { font-size: 11px; color: var(--muted); line-height: 1.5; margin-top: 6px; font-weight: 300; }
+  #layers-panel { position: fixed; top: 76px; right: 16px; width: 352px; padding: 12px 14px 6px; }
+  #layers-panel h3 { margin: 2px 0 6px; font-size: 13px; font-weight: 800; display: flex; justify-content: space-between; align-items: baseline; }
+  #layers-panel h3 span { color: var(--muted); font-weight: 300; font-size: 11px; }
+  #layers-panel .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  #layers-panel canvas { width: 156px; height: 117px; border-radius: 6px; background: #000; image-rendering: pixelated; }
+  #layers-panel .cap { font-size: 11px; color: var(--muted); margin: 3px 0 5px; font-weight: 300; }
+  @media (max-height: 760px) { #layers-panel { display: none; } }
+  @media (max-width: 1250px) { #layers-panel { display: none; } }
+  @media (max-width: 980px) { #eye-panel { display: none; } #title small { display: none; } }
+
+  #feed { position: fixed; bottom: 18px; right: 16px; width: 400px; max-width: calc(100vw - 32px); padding: 12px 14px; }
+  #events { list-style: none; margin: 0; padding: 0; min-height: 110px; }
+  #events li { display: flex; gap: 10px; align-items: baseline; padding: 2px 0; color: var(--muted); font-size: 13px; transition: color .3s; }
+  #events li:first-child { color: var(--text); font-weight: 600; }
+  #events li .t { font-variant-numeric: tabular-nums; font-size: 11px; opacity: .7; min-width: 46px; }
+  #events li.place .x { color: var(--good); } #events li.pick .x { color: var(--cyan); }
+  #events li.broke .x, #events li.red .x, #events li.sell .x { color: var(--bad); } #events li.wings .x { color: var(--gold); }
+  #controls { display: flex; gap: 8px; align-items: center; margin-top: 10px; border-top: 1px solid var(--glass-line); padding-top: 10px; }
+  #controls .lbl { color: var(--muted); font-size: 12px; margin-inline-end: 4px; }
+  button { background: rgba(255,255,255,.06); color: var(--text); border: 1px solid rgba(255,255,255,.12); border-radius: 9px;
+    padding: 5px 12px; font: inherit; font-weight: 600; cursor: pointer; transition: background .15s, transform .12s; }
+  button:hover { background: rgba(255,255,255,.12); transform: translateY(-1px); }
+  button.on { border-color: var(--gold); color: var(--gold); }
+  #controls .grow { flex: 1; }
+  #hint { color: var(--muted); font-size: 11px; font-weight: 300; }
+
+  #toast { position: fixed; top: 42%; left: 50%; transform: translate(-50%, -50%) scale(.9); padding: 18px 34px; font-size: 28px; font-weight: 800;
+    opacity: 0; pointer-events: none; transition: opacity .3s, transform .3s; text-shadow: 0 4px 20px rgba(0,0,0,.6); }
+  #toast.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  #toast.win { color: var(--good); } #toast.lose { color: var(--bad); }
+  #vignette { position: fixed; inset: 0; pointer-events: none; background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.55) 100%); }
+  #connecting { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); color: var(--muted); font-size: 16px; }
+</style>
+</head>
+<body>
+<div id="scene"></div>
+<div id="vignette"></div>
+<div id="connecting">מחבר את הזבוב למסך...</div>
+
+<div id="top">
+  <div id="title" class="glass"><span class="dot"></span>זבוב מול מסך · Bloons TD<small id="subtitle">FlyWire · אונה אופטית ימנית</small></div>
+  <div id="spacer"></div>
+  <div id="gen" class="glass">קריאה מדור <b id="gen-n">—</b></div>
+  <div id="stats" class="glass">
+    <div class="stat"><div class="v" id="s-round">—</div><div class="k">סיבוב</div></div>
+    <div class="stat money"><div class="v" id="s-money">—</div><div class="k">כסף</div></div>
+    <div class="stat lives" id="lives-box"><div class="v" id="s-lives">—</div><div class="k">חיים</div></div>
+    <div class="stat"><div class="v" id="s-towers">—</div><div class="k">מגדלים</div></div>
+  </div>
+</div>
+
+<div id="eye-panel" class="glass">
+  <h3>מה הזבוב רואה <span>796 עמודות · כל אחת צבע אחד</span></h3>
+  <canvas id="eye" width="320" height="240"></canvas>
+  <h3 style="margin-top:10px">לאן הוא רוצה להסתכל <span>מפת הבולטות · + = המבט = הסמן</span></h3>
+  <canvas id="sal" width="320" height="240"></canvas>
+  <div class="legend">המוח קפוא: חיווט FlyWire, דינמיקה מ-flyvis. רק 647 משקלי הקריאה עברו אבולוציה.</div>
+</div>
+
+<div id="layers-panel" class="glass">
+  <h3>בתוך האונה האופטית <span>כחול = פחות מבמנוחה · כתום = יותר</span></h3>
+  <div class="pair">
+    <div><canvas id="l0" width="160" height="120"></canvas><div class="cap" id="c0"></div></div>
+    <div><canvas id="l1" width="160" height="120"></canvas><div class="cap" id="c1"></div></div>
+    <div><canvas id="l2" width="160" height="120"></canvas><div class="cap" id="c2"></div></div>
+    <div><canvas id="l3" width="160" height="120"></canvas><div class="cap" id="c3"></div></div>
+  </div>
+</div>
+
+<div id="feed" class="glass">
+  <ul id="events"></ul>
+  <div id="controls">
+    <span class="lbl">מהירות</span>
+    <button data-speed="1">×1</button><button data-speed="2">×2</button><button data-speed="4">×4</button>
+    <span class="grow"></span>
+    <button id="new">משחק חדש</button>
+  </div>
+  <div id="hint">גרור לסובב · גלגלת לזום · המצלמה חוזרת לעקוב אחרי כמה שניות</div>
+</div>
+<div id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/GammaCorrectionShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -264,6 +264,9 @@ python -m bloons.strategies           # simple strategies over all 50 rounds
 python -m flybrain.verify_vision      # what the eye does: ON/OFF, objects, position, motion, looming
 python -m bloons.watch                # the closed loop: aim, reaction time, speed, and a video
 python -m bloons.eye_vs_pixels        # does the optic lobe help find bloons, or would pixels do?
+python -m bloons.train                # evolve the read-outs (the brain frozen); resumes where it stopped
+python -m bloons.replay data/train/linear --current   # a video of the current read-out playing
+python -m bloons.desk_server          # the fly at a desk, playing live: http://localhost:8767
 ```
 
 Smaller pieces, worth reading first:

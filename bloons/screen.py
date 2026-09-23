@@ -113,7 +113,7 @@ _BG = _background()
 class Sprite:
     """A small picture with an anchor: pasted so that the anchor lands on (x, y).
     Only its opaque pixels are kept - every sprite here is solid where it is drawn."""
-    __slots__ = ("ax", "ay", "w", "h", "ys", "xs", "rgb", "rgb01")
+    __slots__ = ("ax", "ay", "w", "h", "ys", "xs", "rgb", "rgb01", "rgb8")
 
     def __init__(self, im, ax, ay):
         a = np.asarray(im.convert("RGBA"))
@@ -121,6 +121,7 @@ class Sprite:
         self.ys, self.xs = np.nonzero(a[:, :, 3] > 127)
         self.rgb = a[self.ys, self.xs, :3].astype(np.float32)
         self.rgb01 = self.rgb / 255.0                   # as the eye takes it
+        self.rgb8 = a[self.ys, self.xs, :3].copy()      # as a picture takes it
 
 
 _CACHE = {}
@@ -417,6 +418,51 @@ def _column_sums(start, count, oy, ox, cut, s_ys, s_xs, s_rgb, canvas, base, cov
                 c = owner[y, x]
                 for j in range(3):
                     sums[c, j] += canvas[y, x, j] - base[y, x, j]
+
+
+class Painter:
+    """The whole screen as a uint8 array, fast enough to show live: the
+    background with the boxes is kept per box state, as in Retina, and only
+    the world and the top layer are pasted each frame.  Equals render()."""
+
+    KEEP = 12
+
+    def __init__(self):
+        from collections import OrderedDict
+        self.bg = np.asarray(_BG).copy()
+        self._states = OrderedDict()
+
+    def _boxes(self, boxes):
+        key = tuple((id(s), x, y) for s, x, y in boxes)
+        state = self._states.get(key)
+        if state is None:
+            base = self.bg.copy()
+            covered = np.zeros(base.shape[:2], dtype=bool)
+            for s, x, y in boxes:
+                ys, xs = s.ys + (y - s.ay), s.xs + (x - s.ax)
+                on = (ys >= 0) & (ys < R.HEIGHT) & (xs >= 0) & (xs < R.WIDTH)
+                base[ys[on], xs[on]] = s.rgb8[on]; covered[ys[on], xs[on]] = True
+            state = self._states[key] = (base, covered)
+            if len(self._states) > self.KEEP:
+                self._states.popitem(last=False)
+        else:
+            self._states.move_to_end(key)
+        return state
+
+    def picture(self, game, mouse=None):
+        world, boxes, top = draw_list(game, mouse)
+        base, covered = self._boxes(boxes)
+        img = base.copy()
+        for layer, cut in ((world, True), (top, False)):
+            for s, x, y in layer:
+                ys, xs = s.ys + (y - s.ay), s.xs + (x - s.ax)
+                on = (ys >= 0) & (ys < R.HEIGHT) & (xs >= 0) & (xs < R.WIDTH)
+                ys, xs, rgb = ys[on], xs[on], s.rgb8[on]
+                if cut:
+                    keep = ~covered[ys, xs]
+                    ys, xs, rgb = ys[keep], xs[keep], rgb[keep]
+                img[ys, xs] = rgb
+        return img
 
 
 class Retina:
