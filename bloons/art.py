@@ -18,12 +18,15 @@ anti-aliasing would have it.
 """
 import json
 import math
+from collections import OrderedDict
 from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from flybrain.connectome import DATA_DIR
+
+LEAF_BUDGET = 96 * 2**20           # bytes of shape images kept in memory (all of them: ~1 GB)
 
 ART = DATA_DIR / "btd1_art"
 IDENTITY = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)      # a, b, c, d, tx, ty:  x' = a x + c y + tx,  y' = b x + d y + ty
@@ -62,7 +65,8 @@ class Library:
         self.buttons = {int(k): v for k, v in lib.get("buttons", {}).items()}
         self.fonts = {int(k): v for k, v in lib["fonts"].items()}
         self.names = lib["names"]
-        self._images, self._lists, self._fonts = {}, {}, {}
+        self._images, self._lists, self._fonts = OrderedDict(), {}, {}
+        self._image_bytes = 0
 
     # ------------------------------------------------ timelines
     def label(self, sid, name):
@@ -95,18 +99,24 @@ class Library:
     def _leaf(self, sid, state="up"):
         """(premultiplied RGBA float image at 2x, origin x, origin y)."""
         key = (sid, state)
-        if key not in self._images:
-            info = self.leaves.get(sid)
-            if info is None:
-                self._images[key] = None
-            else:
-                if "frames" in info:
-                    info = info["frames"][state]
-                elif "file" not in info:
-                    info = info.get(state) or info.get("up")
-                im = np.asarray(Image.open(self.path / "leaves" / info["file"]).convert("RGBA")).astype(np.float32) / 255
-                im[:, :, :3] *= im[:, :, 3:]
-                self._images[key] = (im, info["ox"], info["oy"])
+        if key in self._images:
+            self._images.move_to_end(key)
+            return self._images[key]
+        info = self.leaves.get(sid)
+        if info is None:
+            self._images[key] = None
+            return None
+        if "frames" in info:
+            info = info["frames"][state]
+        elif "file" not in info:
+            info = info.get(state) or info.get("up")
+        im = np.asarray(Image.open(self.path / "leaves" / info["file"]).convert("RGBA")).astype(np.float32) / 255
+        im[:, :, :3] *= im[:, :, 3:]
+        self._images[key] = (im, info["ox"], info["oy"])
+        self._image_bytes += im.nbytes
+        while self._image_bytes > LEAF_BUDGET and len(self._images) > 1:      # the least recently used go
+            _, old = self._images.popitem(last=False)
+            self._image_bytes -= old[0].nbytes if old else 0
         return self._images[key]
 
     def _font(self, fid, size):
@@ -251,6 +261,6 @@ def trim(img, ox, oy):
     """Cut an RGBA picture down to its visible part, moving the origin with it."""
     ys, xs = np.nonzero(img[:, :, 3])
     if len(ys) == 0:
-        return img[:1, :1], ox, oy
+        return img[:1, :1].copy(), ox, oy
     y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
-    return img[y0:y1, x0:x1], ox - x0, oy - y0
+    return img[y0:y1, x0:x1].copy(), ox - x0, oy - y0             # a copy: a view would keep the whole canvas

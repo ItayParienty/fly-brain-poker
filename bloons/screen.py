@@ -28,6 +28,7 @@ one list of pictures gives two things:
 
     frame = render(game, mouse)              # PIL.Image, RGB, 640x480
 """
+import itertools
 import math
 import os
 from collections import OrderedDict
@@ -50,26 +51,37 @@ else:
 # ---------------------------------------------------------------- sprites
 class Sprite:
     """A picture with an anchor, pasted so that the anchor lands on (x, y).
-    Keeps the pixels that are not fully transparent, with their opacity."""
-    __slots__ = ("ax", "ay", "ys", "xs", "rgb", "a")
+    Keeps the pixels that are not fully transparent, with their opacity; `uid`
+    names it in the caches below (unlike id(), never reused)."""
+    __slots__ = ("uid", "ax", "ay", "ys", "xs", "rgb", "a")
+    _uids = itertools.count()
 
     def __init__(self, rgba, ox, oy):
         rgba = np.asarray(rgba)
+        self.uid = next(Sprite._uids)
         self.ax, self.ay = int(round(ox)), int(round(oy))
-        self.ys, self.xs = np.nonzero(rgba[:, :, 3])
+        self.ys, self.xs = (v.astype(np.int32) for v in np.nonzero(rgba[:, :, 3]))
         self.rgb = rgba[self.ys, self.xs, :3].astype(np.float32) / 255.0
         self.a = rgba[self.ys, self.xs, 3].astype(np.float32) / 255.0
 
 
-_CACHE = {}
+_CACHE = OrderedDict()
+_CACHED = [0]                     # pixels in the cache
+SPRITE_BUDGET = 2_000_000         # ~50 MB; the least recently used sprites go beyond it
 
 
 def sprite(name, *args):
-    """LOOK.<name>(*args) as a Sprite, made once."""
+    """LOOK.<name>(*args) as a Sprite, kept while it is in use."""
     key = (name,) + args
     s = _CACHE.get(key)
     if s is None:
         s = _CACHE[key] = Sprite(*getattr(LOOK, name)(*args))
+        _CACHED[0] += len(s.ys)
+        while _CACHED[0] > SPRITE_BUDGET and len(_CACHE) > 1:
+            _, old = _CACHE.popitem(last=False)
+            _CACHED[0] -= len(old.ys)
+    else:
+        _CACHE.move_to_end(key)
     return s
 
 
@@ -146,22 +158,24 @@ _STATES = OrderedDict()
 KEEP = 16
 
 
-def _boxes(boxes):
-    """(base = boxes over the background, premultiplied box colour, box opacity) for a set of boxes."""
-    key = tuple((id(s), x, y) for s, x, y in boxes)
+def _boxes(boxes, stride=1):
+    """(base = boxes over the background, premultiplied box colour, box opacity) for a set
+    of boxes, on every `stride`-th pixel in each direction (the retina's grid)."""
+    key = (stride,) + tuple((s.uid, x, y) for s, x, y in boxes)
     state = _STATES.get(key)
     if state is not None:
         _STATES.move_to_end(key)
         return state
-    pm = np.zeros(_BG.shape, np.float32)
-    a = np.zeros(_BG.shape[:2], np.float32)
+    bg = np.ascontiguousarray(_BG[::stride, ::stride])
+    pm = np.zeros(bg.shape, np.float32)
+    a = np.zeros(bg.shape[:2], np.float32)
     for s, x, y in boxes:
         ys, xs = s.ys + (y - s.ay), s.xs + (x - s.ax)
-        on = (ys >= 0) & (ys < R.HEIGHT) & (xs >= 0) & (xs < R.WIDTH)
-        ys, xs, sa = ys[on], xs[on], s.a[on]
+        on = (ys >= 0) & (ys < R.HEIGHT) & (xs >= 0) & (xs < R.WIDTH) & (ys % stride == 0) & (xs % stride == 0)
+        ys, xs, sa = ys[on] // stride, xs[on] // stride, s.a[on]
         pm[ys, xs] = pm[ys, xs] * (1 - sa[:, None]) + s.rgb[on] * sa[:, None]
         a[ys, xs] = a[ys, xs] * (1 - sa) + sa
-    base = pm + (1 - a[:, :, None]) * _BG
+    base = pm + (1 - a[:, :, None]) * bg
     state = _STATES[key] = (base, pm, a)
     if len(_STATES) > KEEP:
         _STATES.popitem(last=False)
@@ -198,13 +212,14 @@ def render(game, mouse=None):
 # every sprite the retina has pasted, in one flat store the compiled loop can index
 _STORE = dict(ys=np.zeros(1 << 16, np.int32), xs=np.zeros(1 << 16, np.int32), rgb=np.zeros((1 << 16, 3), np.float32),
               a=np.zeros(1 << 16, np.float32), used=0, where={})
+STORE_CAP = 1_500_000             # pixels; past it the store starts again empty (between frames)
 
 
 def _stored(s, stride=1, py=0, px=0):
     """(start, length) in the store of a sprite's pixels that land on the retina's
     sampling grid when the sprite is pasted at an offset with (y, x) % stride == (py, px),
     in grid coordinates; added the first time."""
-    key = (id(s), stride, py, px)
+    key = (s.uid, stride, py, px)
     at = _STORE["where"].get(key)
     if at is None:
         if stride == 1:
@@ -295,24 +310,26 @@ class Retina:
         self.stamps = [np.zeros(self.owner.shape, np.int64) for _ in range(3)]
         self.bg = np.ascontiguousarray(_BG[::stride, ::stride])
         self.frame_id = 0
-        self._states = {}
+        self._sums = OrderedDict()
 
     def _state(self, boxes):
-        """The boxes' arrays on this retina's grid, and the base's column sums."""
-        key = tuple((id(s), x, y) for s, x, y in boxes)
-        st = self._states.get(key)
-        if st is None:
-            base, pm, a = _boxes(boxes)
-            k = self.stride
-            base, pm, a = (np.ascontiguousarray(v[::k, ::k]) for v in (base, pm, a))
+        """The boxes' arrays on this retina's grid (shared by the retinas), and the base's column sums."""
+        base, pm, a = _boxes(boxes, self.stride)
+        key = tuple((s.uid, x, y) for s, x, y in boxes)
+        sums = self._sums.get(key)
+        if sums is None:
             own = self.owner.ravel()
-            sums = np.stack([np.bincount(own, weights=base[:, :, c].ravel(), minlength=self.n) for c in range(3)], axis=1)
-            st = self._states[key] = (base, pm, a, sums)
-            if len(self._states) > KEEP:
-                self._states.pop(next(iter(self._states)))
-        return st
+            sums = self._sums[key] = np.stack([np.bincount(own, weights=base[:, :, c].ravel(), minlength=self.n)
+                                               for c in range(3)], axis=1)
+            if len(self._sums) > 4 * KEEP:
+                self._sums.popitem(last=False)
+        else:
+            self._sums.move_to_end(key)
+        return base, pm, a, sums
 
     def colours(self, game, mouse=None):
+        if _STORE["used"] > STORE_CAP:
+            _STORE["where"].clear(); _STORE["used"] = 0
         world, boxes, top = draw_list(game, mouse)
         base, pm, box_a, base_sums = self._state(boxes)
         k = self.stride

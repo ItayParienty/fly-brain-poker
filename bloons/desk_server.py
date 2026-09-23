@@ -6,9 +6,9 @@ the screen as a JPEG, what each of the eye's 796 columns sees, where the fly
 wants to look, four layers of its optic lobe, and every press. The front end
 (bloons/desk/) puts the fly at a desk in front of a monitor showing that game.
 
-The read-out is the evolving one from bloons/train.py (data/train/<run>/),
-reloaded at the start of every game, so the fly on the desk is always the
-latest one.
+The read-out is the evolving one from bloons/train.py (data/train/<run>/,
+by default the run saved most recently), reloaded at the start of every
+game, so the fly on the desk is always the latest one.
 
     python -m bloons.desk_server              # then open http://localhost:8767
 
@@ -206,13 +206,14 @@ def main():
     from flybrain import console_utf8  # noqa: F401
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8767)
-    ap.add_argument("--run", default="linear")
+    ap.add_argument("--run", help="a training run in data/train/ (default: the one saved most recently)")
     ap.add_argument("--speed", type=float, default=0.5, help="1 = real time; the fly is quick, so it starts at half")
     args = ap.parse_args()
-    desk = Desk(args.run, args.speed)
+    run = args.run or max((DATA_DIR / "train").glob("*/state.npz"), key=lambda p: p.stat().st_mtime).parent.name
+    desk = Desk(run, args.speed)
     threading.Thread(target=desk.run_forever, daemon=True).start()
     server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(desk))
-    print(f"the fly's desk at http://localhost:{args.port}   (read-out: {args.run}, generation {desk.generation})", flush=True)
+    print(f"the fly's desk at http://localhost:{args.port}   (read-out: {run}, generation {desk.generation})", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -104,7 +104,7 @@ def number(field, value):
     return _placed(field, text=str(value))
 
 
-@functools.lru_cache(maxsize=1024)
+@functools.lru_cache(maxsize=128)
 def message(text, frame=20):
     """The message box (output) on a frame of its timeline: 1-14 fade in, 221-233 fade out."""
     return _placed("output", frame=frame, set={"inner": {"output_txt": dict(text=text)}})
@@ -117,7 +117,7 @@ def towerinfo(kind):
                                          towerspeed_txt=dict(text=speed), towerinfo_txt=dict(text=info)))
 
 
-@functools.lru_cache(maxsize=512)
+@functools.lru_cache(maxsize=64)
 def options(kind, upgrades, affordable, sell_value, rng, rate):
     """The upgrade panel for a selected tower (toweroptions and its Refresh())."""
     t = TOOL[kind]
