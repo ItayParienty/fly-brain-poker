@@ -57,14 +57,13 @@ def _progress(g, pops0):
 
 def worker(conn, lo, hi, owner, n_columns, colours_name, actions_name, n_total, n_columns_total):
     from bloons.game import Game
-    from bloons.screen import Retina
+    from bloons.screen import RETINA_STRIDE, Retina          # (not via fly_player: that would load torch in every worker)
     from bloons.ui import Mouse
     n = hi - lo
     shm_c = shared_memory.SharedMemory(name=colours_name)
     shm_a = shared_memory.SharedMemory(name=actions_name)
     colours = np.ndarray((n_total, n_columns_total, 3), dtype=np.float32, buffer=shm_c.buf)
     actions = np.ndarray((n_total, STEPS_PER_FRAME, 4), dtype=np.float32, buffer=shm_a.buf)
-    from bloons.fly_player import RETINA_STRIDE
     retinas = [Retina(owner, n_columns, RETINA_STRIDE) for _ in range(n)]
     games = mice = None
     while True:

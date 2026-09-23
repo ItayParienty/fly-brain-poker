@@ -291,6 +291,9 @@ def _column_sums(start, count, oy, ox, is_world, s_ys, s_xs, s_rgb, s_a, bg, bas
                     sums[c, j] += canvas[y, x, j] - base[y, x, j]
 
 
+RETINA_STRIDE = 2                 # what the flies use: every other pixel of each column's patch
+
+
 class Retina:
     """What each of the eye's columns sees: the mean colour of its patch of screen.
 

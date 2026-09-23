@@ -24,14 +24,13 @@ import torch
 
 from bloons import rules as R
 from bloons.game import Game
-from bloons.screen import LOOK_NAME, Retina, render
+from bloons.screen import LOOK_NAME, RETINA_STRIDE, Retina, render
 from bloons.ui import Mouse
 from flybrain.connectome import DATA_DIR
 from flybrain.flyvis_eye import FlyvisNetwork
 from flybrain.vision import SPECTRAL
 
 STEPS_PER_FRAME = 2
-RETINA_STRIDE = 2                 # the retina averages every other pixel of each column's patch (screen.Retina)
 
 
 def norm_path():
