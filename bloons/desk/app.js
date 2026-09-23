@@ -356,8 +356,8 @@
     gazeSpot.position.copy(gaze.target); gazeSpot.scale.setScalar(1 + reach * 0.8);
     // the camera follows unless someone is holding it
     if (now - lastInteraction > 6000) {
-      if (now - viewSince > 14000) { viewIndex = (viewIndex + 1) % VIEWS.length; viewSince = now; }
-      const v = VIEWS[viewIndex], k = 1 - Math.exp(-dt * 1.2);
+      if (now - viewSince > 20000) { viewIndex = (viewIndex + 1) % VIEWS.length; viewSince = now; }
+      const v = VIEWS[viewIndex], k = 1 - Math.exp(-dt * 0.7);
       camera.position.lerp(v.pos, k); controls.target.lerp(v.target, k);
     } else viewSince = now;
     controls.update();

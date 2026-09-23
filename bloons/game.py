@@ -34,6 +34,9 @@ from bloons import original as O
 
 POP_DELAY = 4                      # frames from a hit to the pop paying out
 END_ROUND_WAIT = 21                # frames of empty track before a round ends
+WELCOME = ("Welcome to Bloons Tower Defense! Stop the bloons escaping by building towers next to the maze. "
+           "As you get more money build more towers or upgrade existing ones.")   # the title menu's New Game
+MESSAGE_FRAMES, MESSAGE_FADE_OUT = 234, 221   # the message box's timeline: in, a wait, out, gone
 DART_TIP = 6.0                     # the original shifts a dart's hit box this far forward
 TACK_ANGLES = [-90, -45, 0, 45, 90, 135, 180, 225]     # tack1..tack8, screen degrees
 
@@ -93,7 +96,7 @@ class Bloon:
 
 class Tower:
     __slots__ = ("id", "kind", "x", "y", "attack_rate", "range", "pierce_max", "bullet_scale", "freeze_len",
-                 "shoot_power", "upgrades", "spent", "since_shot", "angle", "pops")
+                 "shoot_power", "upgrades", "spent", "since_shot", "angle", "rotation", "shots", "pops")
 
     def __init__(self, id, kind, x, y):
         st = R.TOWERS[kind]
@@ -102,7 +105,8 @@ class Tower:
         self.bullet_scale, self.freeze_len, self.shoot_power = st.get("scale", 1.0), st.get("freeze", 0), st.get("proj_speed", 0)
         self.upgrades = [False] * len(R.UPGRADES[kind])
         self.spent = st["cost"]
-        self.since_shot, self.angle, self.pops = 0, 0.0, 0
+        self.since_shot, self.angle, self.pops, self.shots = 0, 0.0, 0, 0
+        self.rotation = 0.0                     # _rotation in degrees: 0 as drawn (up) until it first aims
 
     @property
     def sell_value(self):
@@ -119,7 +123,7 @@ class Tower:
 
 class Bullet:
     __slots__ = ("kind", "x", "y", "vx", "vy", "age", "lifespan", "pierce_max", "pierce_count", "tower", "scale",
-                 "hit", "tacks", "checked", "angle")
+                 "hit", "hit_age", "tacks", "checked", "angle")
 
     def __init__(self, tower, target_point):
         self.kind, self.tower = tower.kind, tower
@@ -136,6 +140,7 @@ class Bullet:
         self.pierce_max, self.pierce_count = tower.pierce_max, 0
         self.scale = tower.bullet_scale
         self.hit = False                          # a bomb that has gone off
+        self.hit_age = 0                          # frames since it went off (its explosion's frame)
         self.tacks = [True] * 8 if tower.kind == "Tack" else None
         # the original flips a "checked" flag on each tack per bloon it tests,
         # and skips the test when the flag is up - so every tack is only
@@ -177,13 +182,23 @@ class Game:
         self.in_round = False
         self.frame = 0                          # frames since the game began
         self.bloons, self.towers, self.bullets = [], [], []
-        self.hint = "Press Start Round to begin."
-        self.message = self.hint                # the message box under the map (None = hidden)
+        self.tick = 0                           # frames since the game began, rounds or not (what the screen animates by)
+        self.hint = WELCOME
+        self.message, self.message_frame = None, 0      # the message box: its text, and its timeline's frame (0 = hidden)
+        self.output(WELCOME)
+        self.end_tick = None                    # when the game was won or lost (the banner fades in from there)
         self.selected = None                    # a Tower, for the upgrade panel
         self._next_id = 0
         self.stats = dict(pops=0, leaks=0)
         # round state
         self._queue, self._counter, self._interval, self._no_more, self._end_wait = [], 0, 0, True, 0
+
+    def output(self, text):
+        """BloonsTD.Output: new text in the message box, which fades in if it was not showing,
+        stays about five seconds, and fades out."""
+        self.message = text
+        if not self.message_frame:
+            self.message_frame = 1
 
     # ------------------------------------------------ status
     @property
@@ -243,7 +258,8 @@ class Game:
         self._interval = R.spawn_interval(level)
         self._counter, self._no_more, self._end_wait = 0, False, 0
         self.in_round = True
-        self.message = None                     # StartLevel draws the message box off
+        if self.message_frame:                  # StartLevel draws the message box off
+            self.message_frame = max(self.message_frame, MESSAGE_FADE_OUT)
         return True
 
     def _finish_round(self):
@@ -255,7 +271,9 @@ class Game:
             self.money += bonus
             hint = R.ROUND_TABLE[self.round_no][2]        # the hint shown after round n is the next round's
             self.hint = f"Round {self.round_no} passed. {bonus} money awarded. {hint}".strip()
-            self.message = self.hint
+            self.output(self.hint)
+        else:
+            self.end_tick = self.tick
 
     def _spawn(self, kind, frame=0, ox=None, oy=None):
         if ox is None:
@@ -266,6 +284,9 @@ class Game:
     # ------------------------------------------------ one frame
     def step(self):
         """Advance one frame. Returns (pops, leaks) that happened in it."""
+        self.tick += 1
+        if self.message_frame:
+            self.message_frame = (self.message_frame + 1) % MESSAGE_FRAMES
         if self.over or not self.in_round:
             return 0, 0
         pops = leaks = 0
@@ -284,7 +305,7 @@ class Game:
                 if b.pop_timer >= POP_DELAY:
                     pops += self._remove_popped(b)
         if self.lives <= 0:
-            self.in_round = False; self.stats["leaks"] += leaks
+            self.in_round = False; self.stats["leaks"] += leaks; self.end_tick = self.tick
             return pops, leaks
 
         # 2. every bloon looks for a bullet touching it (one hit per bloon per frame)
@@ -351,15 +372,18 @@ class Game:
             if t.since_shot > t.attack_rate:
                 target = self._target(t)
                 if target is not None:
-                    t.since_shot = 0
+                    t.since_shot = 0; t.shots += 1
                     aim = None if t.kind in ("Tack", "Ice") else target.target_point
                     if aim is not None:
                         t.angle = math.atan2(aim[1] - t.y, aim[0] - t.x)
+                        t.rotation = math.degrees(t.angle) + 90
                     self.bullets.append(Bullet(t, aim))
 
         # 5. bullets age and fly
         for p in list(self.bullets):
             p.age += 1
+            if p.hit:
+                p.hit_age += 1
             if p.age > p.lifespan:
                 self.bullets.remove(p); continue
             p.x += p.vx; p.y += p.vy

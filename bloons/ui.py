@@ -77,7 +77,7 @@ class Mouse:
             kind = self.hover
             if kind is not None:                                  # SetCurrentTool
                 if R.TOWERS[kind]["cost"] > g.money:
-                    g.message = "not enough money."
+                    g.output("not enough money.")
                     return "broke"
                 self._deselect(); self.tool = kind
                 return "pick " + kind
@@ -107,7 +107,7 @@ class Mouse:
             if not self.placeable:
                 return "red ring"
             if R.TOWERS[self.tool]["cost"] > g.money:
-                g.message = "not enough money."
+                g.output("not enough money.")
                 return "broke"
             kind = self.tool
             g.place(kind, x, y); self.tool = None                 # CreateNewTower selects it

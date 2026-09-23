@@ -26,7 +26,7 @@ import torch
 from bloons import original as O
 from bloons import rules as R
 from bloons.bot import ScriptedPlayer
-from bloons.fly_player import Arena, Video, composite, STEPS_PER_FRAME
+from bloons.fly_player import Arena, Video, composite, norm_path, STEPS_PER_FRAME
 from bloons.game import Game
 from flybrain.connectome import DATA_DIR
 from flybrain.flyvis_eye import make_eye
@@ -93,7 +93,7 @@ if __name__ == "__main__":
     a, bot = arena_for(seed=1)
     watch(a, bot, 2400, on_frame=lambda ar, col: rates.append(ar.net.rate.clone()) if ar.frame_no % 8 == 0 else None,
           jitter=20, rng=rng)
-    motor.fit_normalisation(rates); motor.save_normalisation(); del rates
+    motor.fit_normalisation(rates); motor.save_normalisation(norm_path()); del rates
     print(f"normalisation from {2400 // 8} frames of rounds 1-{a.games[0].current_round} ({time.perf_counter() - t0:.0f}s)")
 
     XtX = torch.zeros((T, T), device=motor.device, dtype=torch.float64); Xty = torch.zeros(T, device=motor.device, dtype=torch.float64)
@@ -156,7 +156,7 @@ if __name__ == "__main__":
     # When does each layer of the eye - and the gaze sum - react at the bloon's column
     # (half of its largest change in the first 150 ms), and does the pointer go there?
     while g.in_round: a.frame()
-    g.message = None                                         # its text is a distractor of its own
+    g.message_frame = 0                                      # its text is a distractor of its own
     LAYERS = [t for t in ("L1", "L2", "Mi1", "Tm3", "Tm1", "Tm9", "T4a", "T5a", "LC11", "LC17") if t in motor.types]
     looked, onsets = [], {t: [] for t in LAYERS + ["gaze sum"]}
     ms = 1000 / R.FPS / STEPS_PER_FRAME

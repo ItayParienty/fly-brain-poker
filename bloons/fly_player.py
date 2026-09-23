@@ -24,12 +24,47 @@ import torch
 
 from bloons import rules as R
 from bloons.game import Game
-from bloons.screen import Retina, render
+from bloons.screen import LOOK_NAME, Retina, render
 from bloons.ui import Mouse
+from flybrain.connectome import DATA_DIR
 from flybrain.flyvis_eye import FlyvisNetwork
 from flybrain.vision import SPECTRAL
 
 STEPS_PER_FRAME = 2
+RETINA_STRIDE = 2                 # the retina averages every other pixel of each column's patch (screen.Retina)
+
+
+def norm_path():
+    """The read-outs' normalisation, fitted on the look the screen has (the original art or our drawings)."""
+    return DATA_DIR / f"motor_norm_{LOOK_NAME}.npz"
+
+
+def fit_normalisation(circuit, eye, net, motor, frames=2400, seed=1):
+    """Let one fly watch a scripted player for `frames` frames and fit the read-outs'
+    normalisation (each cell type's typical level and spread) to what its eye did."""
+    from bloons.bot import ScriptedPlayer
+    one = type(motor)(circuit, eye, n_agents=1, rest=motor.rest)
+    one.set({k: v[:1].cpu().numpy() for k, v in motor.params.items()} if motor.params else
+            dict(gaze=np.zeros((1, one.n_types)), press=np.zeros((1, one.n_types)), press_bias=np.full(1, -1.0),
+                 wings=np.zeros((1, one.n_types)), wings_bias=np.full(1, -1.0)))
+    arena = Arena(circuit, eye, net, one, seeds=[seed]); arena.control[:] = False
+    bot, rng, rates, waited = ScriptedPlayer(), np.random.default_rng(seed), [], 0
+    for f in range(frames):
+        g = arena.games[0]
+        if not g.in_round and not g.over:
+            waited += 1
+            if waited >= 80:
+                bot.act(g); g.start_round(); waited = 0
+        elif g.frame % 40 == 0:
+            bot.act(g)
+        if f % 20 == 0:                                        # a pointer that wanders, as a fly's would
+            arena.mice[0].move(rng.uniform(0, R.WIDTH), rng.uniform(0, R.HEIGHT))
+        arena.frame()
+        if f % 8 == 0:
+            rates.append(arena.net.rate.clone())
+    motor.fit_normalisation(rates)
+    motor.save_normalisation(norm_path())
+    return motor
 
 
 class Photoreceptors:
@@ -59,7 +94,7 @@ class Arena:
         assert motor.n_agents == self.n
         self.games = games or [Game(seed=s) for s in seeds]
         self.mice = [Mouse(g) for g in self.games]
-        self.retinas = [Retina(eye.owner, circuit.n_columns) for _ in range(self.n)]
+        self.retinas = [Retina(eye.owner, circuit.n_columns, RETINA_STRIDE) for _ in range(self.n)]
         self.net = FlyvisNetwork(circuit.weights, eye.dyn, n_agents=self.n, dt=net.dt, device=net.device)
         self.net.bias = net.bias.clone(); self.net.reset()
         self.photoreceptors = Photoreceptors(eye, self.net.n_neurons, self.net.device)

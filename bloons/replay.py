@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 
 from bloons import rules as R
-from bloons.fly_player import Arena, Video, composite
+from bloons.fly_player import Arena, norm_path, Video, composite
 from bloons.game import Game
 from bloons.train import IDLE_SECONDS, unpack
 from flybrain.connectome import DATA_DIR
@@ -33,7 +33,7 @@ def main():
     name = (path.name + "_current") if args.current else path.stem
 
     c, eye, net = make_eye()
-    motor = Motor(c, eye, n_agents=1, rest=resting_output(net, eye)); motor.load_normalisation()
+    motor = Motor(c, eye, n_agents=1, rest=resting_output(net, eye)); motor.load_normalisation(norm_path())
     motor.set(unpack(theta[None], motor.n_types))
     game = Game(seed=args.seed)
     arena = Arena(c, eye, net, motor, seeds=[args.seed], games=[game])

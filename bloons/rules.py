@@ -94,20 +94,21 @@ PANEL_X = 470                                   # the UI covers the right of the
 PANEL = (478, 8, 634, 453)                      # inner light-green box
 TEXT_ROWS = {"Round": 22, "Money": 46, "Lives": 70}
 BUILD_LABEL_Y = 107
-TOWER_BUTTON_Y = 138
-TOWER_BUTTON_X = [495, 524, 553, 583, 613]      # Dart, Tack, Ice, Bomb, Super
-TOWER_BUTTON_R = 14
-START_BUTTON = (481, 393, 630, 453)             # "Start Round", shown between rounds
+# [G] the buttons' hit areas, measured on the original's hit-state shapes
+TOWER_BUTTON_Y = 136.5
+TOWER_BUTTON_X = [494.5, 524, 553.5, 583, 612.5]    # Dart, Tack, Ice, Bomb, Super
+TOWER_BUTTON_R = 13.75
+START_BUTTON = (480, 400, 625, 450)             # "Start Round", shown between rounds
 # the upgrade panel replaces "Build Towers" while a tower is selected
 UPGRADE_TITLE_Y, UPGRADE_SPEED_Y, UPGRADE_RANGE_Y = 164, 180, 199
-UPGRADE_BUTTONS = [(486, 218, 551, 336), (559, 218, 624, 336)]
-SELL_BUTTON = (486, 356, 624, 384)
+UPGRADE_BUTTONS = [(484, 220, 552, 363), (554, 220, 623, 363)]   # [G]
+SELL_BUTTON = (484, 367, 622, 391)                                # [G]
 HINT_BOX = (30, 393, 440, 470)                  # the between-rounds message
 # [G] placements on the main timeline: the tower-info box shown while the
 # pointer is over a tower button, and the two buttons under the panel
 TOWERINFO_BOX = (482, 159, 630, 300)
 RESTART_BUTTON = (571, 459, 629, 479)           # td.Init(): the whole game starts again
-MORE_GAMES_BUTTON = (476, 459, 565, 479)        # opens ninjakiwi.com; does nothing here
+MORE_GAMES_BUTTON = (475, 459, 564, 479)        # opens ninjakiwi.com; does nothing here
 MAP_RECT = (0, 0, PANEL_X, HEIGHT)
 
 # ---------------------------------------------------------------- rounds  [C] BuildLevels

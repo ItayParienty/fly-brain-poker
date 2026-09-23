@@ -15,7 +15,7 @@ latest one.
 Endpoints
     GET  /meta        the eye's layout: each column's place on the screen
     GET  /events      a stream of frames (text/event-stream)
-    POST /speed       {"speed": 1 | 2 | 4}
+    POST /speed       {"speed": 0.25 ... 4}   (1 = real time)
     POST /new         start a new game
 """
 import argparse
@@ -31,7 +31,7 @@ import numpy as np
 from PIL import Image
 
 from bloons import rules as R
-from bloons.fly_player import Arena
+from bloons.fly_player import Arena, norm_path
 from bloons.game import Game
 from bloons.screen import Painter
 from bloons.train import IDLE_SECONDS, unpack
@@ -56,7 +56,7 @@ class Desk:
         self.run_dir = DATA_DIR / "train" / run
         self.c, self.eye, self.net = make_eye()
         self.motor = Motor(self.c, self.eye, n_agents=1, rest=resting_output(self.net, self.eye))
-        self.motor.load_normalisation()
+        self.motor.load_normalisation(norm_path())
         self.layer_idx = [self.motor.types.index(t) for t, _ in LAYERS]
         self.painter = Painter()
         self.speed = speed
@@ -194,7 +194,7 @@ def make_handler(desk):
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
             if self.path == "/speed":
-                desk.speed = float(min(max(body.get("speed", 1), 0.5), 8)); self._json({"speed": desk.speed})
+                desk.speed = float(min(max(body.get("speed", 1), 0.1), 8)); self._json({"speed": desk.speed})
             elif self.path == "/new":
                 desk.want_new = True; self._json({"ok": True})
             else:
@@ -207,7 +207,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8767)
     ap.add_argument("--run", default="linear")
-    ap.add_argument("--speed", type=float, default=1.0)
+    ap.add_argument("--speed", type=float, default=0.5, help="1 = real time; the fly is quick, so it starts at half")
     args = ap.parse_args()
     desk = Desk(args.run, args.speed)
     threading.Thread(target=desk.run_forever, daemon=True).start()

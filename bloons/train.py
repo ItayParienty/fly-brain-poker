@@ -64,7 +64,8 @@ def worker(conn, lo, hi, owner, n_columns, colours_name, actions_name, n_total, 
     shm_a = shared_memory.SharedMemory(name=actions_name)
     colours = np.ndarray((n_total, n_columns_total, 3), dtype=np.float32, buffer=shm_c.buf)
     actions = np.ndarray((n_total, STEPS_PER_FRAME, 4), dtype=np.float32, buffer=shm_a.buf)
-    retinas = [Retina(owner, n_columns) for _ in range(n)]
+    from bloons.fly_player import RETINA_STRIDE
+    retinas = [Retina(owner, n_columns, RETINA_STRIDE) for _ in range(n)]
     games = mice = None
     while True:
         cmd, arg = conn.recv()
@@ -229,7 +230,7 @@ def main():
     from flybrain.connectome import DATA_DIR
     from flybrain.flyvis_eye import make_eye, FlyvisNetwork
     from flybrain.motor import Motor, resting_output
-    from bloons.fly_player import Photoreceptors
+    from bloons.fly_player import Photoreceptors, fit_normalisation, norm_path
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--generations", type=int, default=300)
@@ -238,6 +239,7 @@ def main():
     ap.add_argument("--lr", type=float, default=0.02)
     ap.add_argument("--workers", type=int, default=7)
     ap.add_argument("--run", default="linear")
+    ap.add_argument("--start-from", help="a run whose current read-out this one starts from")
     args = ap.parse_args()
     OUT = DATA_DIR / "train" / args.run
     OUT.mkdir(parents=True, exist_ok=True)
@@ -249,7 +251,11 @@ def main():
     for lo, hi in ((0, A // 2), (A // 2, A)):
         net = FlyvisNetwork(c.weights, eye.dyn, n_agents=hi - lo, dt=net1.dt, device=net1.device)
         net.bias = net1.bias.clone()
-        motor = Motor(c, eye, n_agents=hi - lo, rest=rest); motor.load_normalisation()
+        motor = Motor(c, eye, n_agents=hi - lo, rest=rest)
+        if not norm_path().exists():
+            print("fitting the read-outs' normalisation to this look ...", flush=True)
+            fit_normalisation(c, eye, net1, motor)
+        motor.load_normalisation(norm_path())
         halves.append((lo, hi, net, motor))
     photoreceptors = Photoreceptors(eye, net1.n_neurons, net1.device)
     T = motor.n_types
@@ -262,6 +268,10 @@ def main():
         opt = Adam(len(theta), args.lr); opt.m, opt.v, opt.t = st["m"], st["v"], int(st["t"])
         rng = np.random.default_rng(gen0)
         print(f"resuming {OUT.name} at generation {gen0}")
+    elif args.start_from:
+        theta, gen0 = np.load(DATA_DIR / "train" / args.start_from / "state.npz")["theta"], 0
+        opt = Adam(len(theta), args.lr)
+        print(f"starting from {args.start_from}'s current read-out")
     else:
         theta, gen0 = initial(T, rng), 0
         opt = Adam(len(theta), args.lr)

@@ -22,7 +22,7 @@ import torch
 from scipy.spatial import cKDTree
 
 from bloons.bot import ScriptedPlayer
-from bloons.fly_player import Arena
+from bloons.fly_player import Arena, norm_path
 from bloons.game import Game
 from bloons.watch import watch, bloon_columns, visible
 from flybrain.flyvis_eye import make_eye
@@ -70,7 +70,7 @@ def train(X, Y, hidden, device, epochs=6, seed=0):
 if __name__ == "__main__":
     from flybrain import console_utf8  # noqa: F401
     c, eye, net = make_eye()
-    motor = Motor(c, eye, n_agents=1, rest=resting_output(net, eye)); motor.load_normalisation()
+    motor = Motor(c, eye, n_agents=1, rest=resting_output(net, eye)); motor.load_normalisation(norm_path())
     T, K, dev = motor.n_types, motor.n_columns, motor.device
     motor.set(dict(gaze=np.zeros((1, T)), press=np.zeros((1, T)), press_bias=np.full(1, -1.0),
                    wings=np.zeros((1, T)), wings_bias=np.full(1, -1.0)))
