@@ -27,6 +27,9 @@ the pointer over a tower button, the tower-info box shows.
 from bloons import rules as R
 
 
+MODES = ("idle", "holding", "selected")      # the hand's states, which the fly's read-out tells apart
+
+
 def inside(box, x, y):
     return box[0] <= x <= box[2] and box[1] <= y <= box[3]
 
@@ -37,6 +40,12 @@ class Mouse:
         self.x, self.y = R.PANEL_X // 2, R.HEIGHT // 2
         self.tool = None                    # the tower kind being held (currentTool)
         self.presses = 0
+
+    @property
+    def mode(self):
+        """Which of MODES the hand is in: holding nothing, holding a tower, or a tower selected
+        (its upgrade panel open)."""
+        return 1 if self.tool is not None else 2 if self.game.selected is not None else 0
 
     def move(self, x, y):
         """Pointer positions are whole pixels, as Flash's _xmouse is."""

@@ -25,9 +25,16 @@ pressed loses `habituation` of its salience, and a spot it keeps looking at
 loses `fatigue` per step; both recover over 1.5 s.  So the gaze moves on,
 instead of pressing the same button forever or staring at one spot.
 
+The gaze and the press can read the eye differently in each state of the
+hand (n_states; for the game: holding nothing, holding a tower, a tower
+selected - bloons/ui.py MODES), so what the fly looks for can depend on
+what it is doing - as a fly's visual responses change with its behaviour
+(walking or flying, for one).  The state comes with each step; a weight
+still never belongs to a place on the screen.
+
     motor = Motor(circuit, eye, n_agents, rest=resting_output(net, eye))
     motor.set(params)                    # weights per fly, see random_params()
-    gaze, press, wings = motor.step(net.rate)
+    gaze, press, wings = motor.step(net.rate, state)
 """
 import numpy as np
 import torch
@@ -53,9 +60,9 @@ def resting_output(net, eye, grey=128, settle=80, average=40):
 
 
 class Motor:
-    def __init__(self, circuit, eye, n_agents=1, dt=0.0125, rest=None, device=None):
+    def __init__(self, circuit, eye, n_agents=1, dt=0.0125, rest=None, device=None, n_states=3):
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
-        self.n_agents, self.dt = n_agents, dt
+        self.n_agents, self.dt, self.n_states = n_agents, dt, n_states
         self.rest = torch.zeros(circuit.n_neurons, device=self.device) if rest is None else torch.as_tensor(rest, device=self.device)
         types = circuit.neuron_classes.astype(str)
         rf = eye.rf_screen
@@ -132,16 +139,37 @@ class Motor:
     # ------------------------------------------------ weights
     def set(self, params):
         """params: dict of arrays with a leading fly axis -
-        gaze (A, T), press (A, T), press_bias (A,), wings (A, T), wings_bias (A,),
+        gaze (A, S, T), press (A, S, T), press_bias (A, S): one set per state, or
+        (A, T), (A, T), (A,): the same in every state; wings (A, T), wings_bias (A,),
         and optionally hold (A,), habituation (A,) and fatigue (A,)."""
-        A = self.n_agents
+        A, S = self.n_agents, self.n_states
         params = dict(dict(hold=np.full(A, 0.25), habituation=np.full(A, 4.0), fatigue=np.zeros(A)), **params)
-        self.params = {k: torch.as_tensor(np.asarray(v, dtype=np.float32), device=self.device) for k, v in params.items()}
-        # fold the normalisation into the weights: per neuron w / scale, and a per-column offset
-        w = torch.stack([self.params[k] for k in ("gaze", "press", "wings")])              # (3, A, T)
+        params = {k: np.asarray(v, dtype=np.float32) for k, v in params.items()}
+        for k in ("gaze", "press"):
+            if params[k].ndim == 2:
+                params[k] = np.repeat(params[k][:, None], S, 1)
+        if params["press_bias"].ndim == 1:
+            params["press_bias"] = np.repeat(params["press_bias"][:, None], S, 1)
+        self.params = {k: torch.as_tensor(v, device=self.device) for k, v in params.items()}
+        self._folded = False
+
+    def set_state(self, state):
+        """Each fly's state, (A,) ints: which of its weight sets the gaze and press use."""
+        state = np.asarray(state, dtype=np.int64)
+        if not np.array_equal(state, self._state):
+            self._state = state.copy()
+            self.state = torch.as_tensor(state, device=self.device)
+            self._folded = False
+
+    def _fold(self):
+        """Each fly's weights for its current state, with the normalisation folded in:
+        per neuron w / scale, and a per-column offset."""
+        A, ar = self.n_agents, torch.arange(self.n_agents, device=self.device)
+        w = torch.stack([self.params["gaze"][ar, self.state], self.params["press"][ar, self.state], self.params["wings"]])  # (3, A, T)
         per_type = torch.cat([w / self.scale, torch.zeros_like(w[:, :, :1])], 2)            # a zero for unread neurons
         self._neuron_w = per_type.permute(2, 0, 1).reshape(self.n_types + 1, 3 * A)[self._type_of]   # (N, 3A)
         self._offset = self.present.T.float() @ (w * (self.mean / self.scale)).permute(2, 0, 1).reshape(self.n_types, 3 * A)
+        self._folded = True
 
     def random_params(self, rng, scale=0.3):
         A, T = self.n_agents, self.n_types
@@ -155,16 +183,24 @@ class Motor:
         self.habituation = torch.zeros((K, A), device=self.device)
         self.refractory = torch.zeros(A, dtype=torch.long, device=self.device)
         self.salience = torch.zeros((K, A), device=self.device)
+        self._state = np.zeros(A, np.int64)
+        self.state = torch.zeros(A, dtype=torch.long, device=self.device)
+        self._folded = False
 
     def sums(self, rate):
         """The three weighted sums in every column, (3, K, A): gaze, press and wings -
         sum over types of weight x maps(rate), computed without building the maps."""
         A = self.n_agents
+        if not self._folded:
+            self._fold()
         x = (rate - self.rest[:, None]).repeat(1, 3) * self._neuron_w                     # (N, 3A)
         return (torch.sparse.mm(self._column_pool, x) - self._offset).view(-1, 3, A).permute(1, 0, 2)
 
-    def step(self, rate):
-        """One brain step. rate: (N, A). Returns numpy (gaze column, press, wings) per fly."""
+    def step(self, rate, state=None):
+        """One brain step. rate: (N, A); state: (A,) each fly's state, if it changed.
+        Returns numpy (gaze column, press, wings) per fly."""
+        if state is not None:
+            self.set_state(state)
         p, ar = self.params, torch.arange(self.n_agents, device=self.device)
         gaze_sum, press_sum, wings_sum = self.sums(rate)                        # each (K, A)
         sal = self.near @ gaze_sum - self.habituation
@@ -172,7 +208,7 @@ class Motor:
         move = sal[best, ar] > sal[self.fixation, ar] + p["hold"]
         self.fixation = torch.where(move, best, self.fixation)
         fovea = self.near[self.fixation]                                       # (A, K): what is being looked at
-        press = ((fovea * press_sum.T).sum(1) + p["press_bias"] > 0) & (self.refractory == 0)
+        press = ((fovea * press_sum.T).sum(1) + p["press_bias"][ar, self.state] > 0) & (self.refractory == 0)
         wings = wings_sum.mean(0) + p["wings_bias"] > 0
         self.refractory = torch.where(press, torch.full_like(self.refractory, PRESS_REFRACTORY), (self.refractory - 1).clamp_min(0))
         self.habituation = (self.habituation * float(np.exp(-self.dt / HABITUATION_TAU))

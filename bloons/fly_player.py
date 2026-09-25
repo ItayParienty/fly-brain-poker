@@ -112,9 +112,10 @@ class Arena:
         colours = self.colours() if colours is None else colours
         cur = self.currents(colours)
         self.pointers = np.zeros((STEPS_PER_FRAME, self.n, 2))                 # where each fly looked after each step
+        modes = [m.mode for m in self.mice]                                    # as in training: the state the frame began in
         for s in range(STEPS_PER_FRAME):
             rate = self.net.step(cur)
-            gaze, press, wings = self.motor.step(rate)
+            gaze, press, wings = self.motor.step(rate, modes)
             self.pointers[s] = self.motor.pointer(gaze)
             for a in np.flatnonzero(self.control):
                 m, g = self.mice[a], self.games[a]

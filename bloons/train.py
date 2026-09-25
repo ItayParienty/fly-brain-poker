@@ -3,8 +3,10 @@
 The connectome, its dynamics and the eye are fixed.  What evolves is the
 read-out (flybrain/motor.py): one weight per cell type for the gaze, one
 for the proboscis, one for the wings, two biases, and the three constants
-of the gaze (hold, habituation, fatigue) - 647 numbers in all.  None of
-them belongs to a place on the screen.
+of the gaze (hold, habituation, fatigue) - 647 numbers in all.  With
+--states 3 the gaze and the proboscis get one set of weights for each
+state of the hand (holding nothing, holding a tower, a tower selected):
+1,505 numbers.  None of them belongs to a place on the screen.
 
 Evolution strategy (OpenAI-ES): each generation, 32 random directions in
 the space of read-outs are tried both ways round - 64 flies - plus the
@@ -22,6 +24,7 @@ brains run on the GPU, in two halves of the population taking turns, so that
 one half's brains think while the other half's games move.
 
     python -m bloons.train --generations 300          # resumes from data/train/ if present
+    python -m bloons.train --run states --start-from art --states 3
 """
 import argparse
 import json
@@ -55,15 +58,17 @@ def _progress(g, pops0):
     return g.round_no + 0.99 * frac
 
 
-def worker(conn, lo, hi, owner, n_columns, colours_name, actions_name, n_total, n_columns_total):
+def worker(conn, lo, hi, owner, n_columns, colours_name, actions_name, states_name, n_total, n_columns_total):
     from bloons.game import Game
     from bloons.screen import RETINA_STRIDE, Retina          # (not via fly_player: that would load torch in every worker)
     from bloons.ui import Mouse
     n = hi - lo
     shm_c = shared_memory.SharedMemory(name=colours_name)
     shm_a = shared_memory.SharedMemory(name=actions_name)
+    shm_s = shared_memory.SharedMemory(name=states_name)
     colours = np.ndarray((n_total, n_columns_total, 3), dtype=np.float32, buffer=shm_c.buf)
     actions = np.ndarray((n_total, STEPS_PER_FRAME, 4), dtype=np.float32, buffer=shm_a.buf)
+    states = np.ndarray((n_total,), dtype=np.int8, buffer=shm_s.buf)          # each hand's mode after its last frame
     retinas = [Retina(owner, n_columns, RETINA_STRIDE) for _ in range(n)]
     games = mice = None
     while True:
@@ -77,6 +82,7 @@ def worker(conn, lo, hi, owner, n_columns, colours_name, actions_name, n_total, 
             counts = np.zeros((n, len(EVENTS)), int); frames = np.zeros(n, int)
             for i in range(n):
                 colours[lo + i] = retinas[i].colours(games[i], mice[i])
+                states[lo + i] = mice[i].mode
             conn.send(None)
             continue
         # one frame for the flies in [arg[0], arg[1]): both brain steps' actions, in order, then the rules
@@ -103,6 +109,7 @@ def worker(conn, lo, hi, owner, n_columns, colours_name, actions_name, n_total, 
             if done[i]:
                 continue
             g.step()
+            states[lo + i] = m.mode
             idle[i] = 0 if g.in_round else idle[i] + 1
             fitness[i] = _progress(g, pops0[i])
             if g.over or g.won or idle[i] > IDLE_SECONDS * R.FPS or frames[i] >= MAX_FRAMES:
@@ -112,7 +119,7 @@ def worker(conn, lo, hi, owner, n_columns, colours_name, actions_name, n_total, 
         status = [(bool(done[i]), float(fitness[i]), games[i].round_no, games[i].lives, len(games[i].towers),
                    counts[i].tolist()) for i in range(n)]
         conn.send(status)
-    shm_c.close(); shm_a.close()
+    shm_c.close(); shm_a.close(); shm_s.close()
 
 
 class Games:
@@ -122,14 +129,17 @@ class Games:
         self.n, self.K = n, n_columns
         self.shm_c = shared_memory.SharedMemory(create=True, size=n * n_columns * 3 * 4)
         self.shm_a = shared_memory.SharedMemory(create=True, size=n * STEPS_PER_FRAME * 4 * 4)
+        self.shm_s = shared_memory.SharedMemory(create=True, size=n)
         self.colours = np.ndarray((n, n_columns, 3), dtype=np.float32, buffer=self.shm_c.buf)
         self.actions = np.ndarray((n, STEPS_PER_FRAME, 4), dtype=np.float32, buffer=self.shm_a.buf)
+        self.states = np.ndarray((n,), dtype=np.int8, buffer=self.shm_s.buf)
         bounds = np.linspace(0, n, workers + 1).astype(int)
         self.conns, self.procs = [], []
         ctx = mp.get_context("spawn")
         for lo, hi in zip(bounds, bounds[1:]):
             a, b = ctx.Pipe()
-            p = ctx.Process(target=worker, args=(b, lo, hi, owner, n_columns, self.shm_c.name, self.shm_a.name, n, n_columns),
+            p = ctx.Process(target=worker, args=(b, lo, hi, owner, n_columns, self.shm_c.name, self.shm_a.name,
+                                                 self.shm_s.name, n, n_columns),
                             daemon=True)
             p.start(); self.conns.append(a); self.procs.append(p)
 
@@ -150,29 +160,51 @@ class Games:
     def close(self):
         for c in self.conns: c.send(("stop", None))
         for p in self.procs: p.join(timeout=5)
-        self.shm_c.close(); self.shm_c.unlink(); self.shm_a.close(); self.shm_a.unlink()
+        for shm in (self.shm_c, self.shm_a, self.shm_s):
+            shm.close(); shm.unlink()
 
 
 # ---------------------------------------------------------------- the read-out as one vector
-def layout(T):
-    return [("gaze", T), ("press", T), ("wings", T), ("press_bias", 1), ("wings_bias", 1),
+def layout(T, S=1):
+    """S: sets of gaze and press weights, one per state of the hand (1: the same in all)."""
+    return [("gaze", S * T), ("press", S * T), ("wings", T), ("press_bias", S), ("wings_bias", 1),
             ("hold", 1), ("habituation", 1), ("fatigue", 1)]
+
+
+def n_states(d, T):
+    """How many weight sets a read-out of d numbers has."""
+    S, r = divmod(d - T - 4, 2 * T + 1)
+    assert r == 0 and S >= 1, f"{d} numbers is not a read-out for {T} cell types"
+    return S
 
 
 def unpack(theta, T):
     """(A, d) -> the Motor's params. The gaze constants are kept positive."""
+    S = n_states(theta.shape[1], T)
     out, i = {}, 0
-    for name, size in layout(T):
+    for name, size in layout(T, S):
         v = theta[:, i:i + size]; i += size
         out[name] = v if size > 1 else v[:, 0]
+    if S > 1:
+        out["gaze"], out["press"] = out["gaze"].reshape(-1, S, T), out["press"].reshape(-1, S, T)
     out["hold"] = np.abs(out["hold"]); out["habituation"] = np.abs(out["habituation"]) * 4
     out["fatigue"] = np.abs(out["fatigue"]) * 0.05
     return out
 
 
-def initial(T, rng):
-    theta = np.concatenate([rng.normal(0, 0.05, 3 * T), [-0.5, 0.5, 0.1, 1.0, 0.2]]).astype(np.float32)
+def initial(T, rng, S=1):
+    theta = np.concatenate([rng.normal(0, 0.05, (2 * S + 1) * T), np.full(S, -0.5), [0.5, 0.1, 1.0, 0.2]]).astype(np.float32)
     return theta
+
+
+def expand(theta, T, S):
+    """A read-out with one set of gaze and press weights -> the same read-out with S equal
+    sets: the fly plays exactly as before, until evolution tells the states apart."""
+    if n_states(len(theta), T) == S:
+        return theta
+    assert n_states(len(theta), T) == 1, "can only split a read-out that has one set"
+    gaze, press, wings, press_bias, rest = theta[:T], theta[T:2 * T], theta[2 * T:3 * T], theta[3 * T], theta[3 * T + 1:]
+    return np.concatenate([np.tile(gaze, S), np.tile(press, S), wings, np.full(S, press_bias), rest]).astype(np.float32)
 
 
 class Adam:
@@ -205,8 +237,9 @@ def play(games, halves, photoreceptors, seed, max_frames=MAX_FRAMES):
     def act(h):
         lo, hi, net, motor = halves[h]
         cur = photoreceptors.currents(games.colours[lo:hi])
+        state = games.states[lo:hi].copy()                # each hand's mode after its last frame
         for s in range(STEPS_PER_FRAME):
-            gaze, press, wings = motor.step(net.step(cur))
+            gaze, press, wings = motor.step(net.step(cur), state)
             xy = motor.centres[gaze]
             games.actions[lo:hi, s, 0] = xy[:, 0]; games.actions[lo:hi, s, 1] = xy[:, 1]
             games.actions[lo:hi, s, 2] = press; games.actions[lo:hi, s, 3] = wings
@@ -239,6 +272,8 @@ def main():
     ap.add_argument("--workers", type=int, default=7)
     ap.add_argument("--run", default="linear")
     ap.add_argument("--start-from", help="a run whose current read-out this one starts from")
+    ap.add_argument("--states", type=int, default=1, choices=(1, 3),
+                    help="3: separate gaze and press weights for holding nothing / holding a tower / a tower selected")
     args = ap.parse_args()
     OUT = DATA_DIR / "train" / args.run
     OUT.mkdir(parents=True, exist_ok=True)
@@ -268,11 +303,11 @@ def main():
         rng = np.random.default_rng(gen0)
         print(f"resuming {OUT.name} at generation {gen0}")
     elif args.start_from:
-        theta, gen0 = np.load(DATA_DIR / "train" / args.start_from / "state.npz")["theta"], 0
+        theta, gen0 = expand(np.load(DATA_DIR / "train" / args.start_from / "state.npz")["theta"], T, args.states), 0
         opt = Adam(len(theta), args.lr)
         print(f"starting from {args.start_from}'s current read-out")
     else:
-        theta, gen0 = initial(T, rng), 0
+        theta, gen0 = initial(T, rng, args.states), 0
         opt = Adam(len(theta), args.lr)
     history_file = OUT / "history.jsonl"
     print(f"{A} flies per generation, {len(theta)} numbers in the read-out, {args.workers} game workers")
