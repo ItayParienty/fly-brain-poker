@@ -78,15 +78,37 @@ def panel_front():
     return _stage((DEPTH["towerplace"] + 1, 600), {n: dict(visible=False) for n in dynamic}), 0, 0
 
 
-def _placed(name_or_depth, set=None, frame=0, state="up", text=None):
-    """One main-timeline item, drawn where the timeline puts it, trimmed."""
+def _placed(name_or_depth, set=None, frame=0, state="up", text=None, box=None):
+    """One main-timeline item, drawn where the timeline puts it, trimmed.  box: the part
+    of the screen (x0, y0, x1, y1) the item can reach, when known - drawing only there
+    gives the same picture, much faster than the whole screen."""
     d = DEPTH[name_or_depth] if isinstance(name_or_depth, str) else name_or_depth
     p = TIMELINE[d]
     z = LIB.zoom
-    canvas = np.zeros((R.HEIGHT * z, R.WIDTH * z, 4), np.float32)
-    m = compose((z, 0, 0, z, 0, 0), (p["matrix"]["sx"], p["matrix"]["r0"], p["matrix"]["r1"], p["matrix"]["sy"], p["matrix"]["tx"], p["matrix"]["ty"]))
+    X0, Y0, X1, Y1 = box or (0, 0, R.WIDTH, R.HEIGHT)
+    canvas = np.zeros(((Y1 - Y0) * z, (X1 - X0) * z, 4), np.float32)
+    m = compose((z, 0, 0, z, -X0 * z, -Y0 * z), (p["matrix"]["sx"], p["matrix"]["r0"], p["matrix"]["r1"], p["matrix"]["sy"],
+                                                 p["matrix"]["tx"], p["matrix"]["ty"]))
     LIB.draw(canvas, p["char"], frame, m, (tuple(p["cx"]),) if "cx" in p else (), set, state, text)
-    return trim(shrink(canvas, z), 0, 0)
+    return trim(shrink(canvas, z), -X0, -Y0)
+
+
+@functools.lru_cache(maxsize=None)
+def _field_box(name, pad=3):
+    """The part of the screen a text field on the main timeline can draw into: its bounds
+    (the field's picture never grows past them) where the timeline places it."""
+    p = TIMELINE[DEPTH[name]]
+    if LIB.kinds.get(p["char"]) != "field":
+        return None
+    x0, y0, x1, y1 = LIB.fields[p["char"]]["bounds"]
+    mt = p["matrix"]
+    a, b, c, d, tx, ty = mt["sx"], mt["r0"], mt["r1"], mt["sy"], mt["tx"], mt["ty"]
+    corners = [(a * u + c * v + tx, b * u + d * v + ty) for u in (x0 - 1, x1 + 2) for v in (y0 - 1, y1 + 2)]
+    X0 = max(int(math.floor(min(x for x, _ in corners))) - pad, 0)
+    X1 = min(int(math.ceil(max(x for x, _ in corners))) + pad, R.WIDTH)
+    Y0 = max(int(math.floor(min(y for _, y in corners))) - pad, 0)
+    Y1 = min(int(math.ceil(max(y for _, y in corners))) + pad, R.HEIGHT)
+    return X0, Y0, X1, Y1
 
 
 @functools.lru_cache(maxsize=None)
@@ -101,7 +123,7 @@ def start_button(frame=0):
 
 @functools.lru_cache(maxsize=4096)
 def number(field, value):
-    return _placed(field, text=str(value))
+    return _placed(field, text=str(value), box=_field_box(field))      # money changes nearly every frame late on
 
 
 @functools.lru_cache(maxsize=128)
