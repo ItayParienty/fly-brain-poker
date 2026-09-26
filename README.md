@@ -11,6 +11,13 @@ cards instead of a smell.
 
 <p align="center"><em>python -m cards.table_server --learn → http://localhost:8765</em></p>
 
+**Part two:** the connectome's optic lobe, given a screen and a mouse, plays
+Bloons Tower Defense 1 through its photoreceptors — and after evolving only
+its read-outs (the brain frozen), **the first fly won the game**. The best
+read-out so far wins 16 of 32 games; the controls that would show how much
+of that the optic lobe's wiring earns are still to come.
+[Details below.](#learning-to-play-the-first-win)
+
 ## What was found
 
 **The measured wiring produces a stable policy; random wiring produces noise.**
@@ -242,6 +249,64 @@ The optic lobe's features help a read-out that cannot compute on its own,
 and a read-out that can compute does not need them. Whatever the fly
 achieves in the game will be measured against the same controls.
 
+### Learning to play: the first win
+
+**How it learns** (`bloons/train.py`). The connectome, its dynamics and the
+eye stay fixed; only the read-outs evolve, by an evolution strategy: each
+generation 32 random changes to the current read-out are tried both ways
+round, 65 flies in all, every one on the same game, scored by rounds finished
+plus the part of the last round popped. The screen the fly sees is the
+original game's own art, drawn by a small Flash renderer over the extracted
+shapes (`bloons/art.py`; the art is extracted from a copy of the game you
+supply and is not in this repo).
+
+**One set of weights: stuck at round 40.** With one weight per cell type for
+the gaze, the proboscis and the wings — 647 numbers — the population went
+from finishing 3 rounds on average to 29 over 131 generations. But in the 16
+generations whose best fly reached round 40 (80 black bloons), that fly died
+there every time. Replays showed why: the flies built only Dart and Tack
+towers, upgraded 0–2 times a game, pressed 1,200–1,700 times where a tower
+cannot go, and died holding 4,000–8,800 unspent money. The gaze was pulled
+to the bloons whatever the hand was doing, so it rarely went to the upgrade
+buttons or found free grass.
+
+**One set per state of the hand.** The gaze and the proboscis now have a set
+of weights for each of three states — holding nothing, holding a tower, a
+tower selected with its upgrade panel open (`Mouse.mode`; 1,505 numbers).
+Still no weight belongs to a place on the screen; what changes with the state
+is which features the fly looks for. Started from the one-set read-out copied
+into all three (it plays exactly as before: a replay gives the same 581
+events), within 16 generations upgrades rose from 1.9 to 5–7 per fly, flies
+got past round 40, and in generation 16 **a fly won all 50 rounds**.
+
+**One game proves little** (`bloons/evaluate.py`). Replayed alone on the same
+game, that first winner lost in round 40: a batch of brains on the GPU sums in
+a different order than one brain alone, and over tens of thousands of steps a
+difference in the seventh digit sends the gaze elsewhere once and the game
+down another path. So read-outs are judged on 32 other games:
+
+| read-out | games won | rounds finished, median | upgrades per game |
+|---|---|---|---|
+| the first winner (generation 16) | 2 of 32 | 39.9 | 6.8 |
+| **the best fly of generation 20** | **16 of 32** | **49.9** | **10.7** |
+| the evolving read-out itself, after generation 21 | 1 of 32 | 42.4 (never below 40) | 10.9 |
+
+The generation-20 fly wins half its games, most of them with 22–39 of 40
+lives left; across its games, the number of upgrades goes with how far it
+gets (correlation 0.85). Training now continues from it.
+
+**What this does not show yet.**
+- That the optic lobe's wiring is what makes it possible. The same evolution
+  with a shuffled optic lobe, and with the photoreceptors alone, has not been
+  run; given the result above that pixels find bloons as well as the optic
+  lobe does, it may well do as well.
+- The state of the hand is handed to the read-out by the game (whether a tower
+  is held or selected) rather than read off the screen, where it is also
+  visible.
+- The flies still press ~1,100 times a game where a tower cannot go — the
+  "holding a tower" weights have not learned to avoid a red ring — and have
+  never bought an Ice, Bomb or Super tower.
+
 ## Running it
 
 ```bash
@@ -265,7 +330,9 @@ python -m flybrain.verify_vision      # what the eye does: ON/OFF, objects, posi
 python -m bloons.watch                # the closed loop: aim, reaction time, speed, and a video
 python -m bloons.eye_vs_pixels        # does the optic lobe help find bloons, or would pixels do?
 python -m bloons.train                # evolve the read-outs (the brain frozen); resumes where it stopped
-python -m bloons.replay data/train/linear --current   # a video of the current read-out playing
+python -m bloons.train --run states --start-from art --states 3      # one weight set per state of the hand
+python -m bloons.evaluate data/train/states --current --games 32     # games won out of 32
+python -m bloons.replay data/train/states --current   # a video of the current read-out playing
 python -m bloons.desk_server          # the fly at a desk, playing live: http://localhost:8767
 ```
 

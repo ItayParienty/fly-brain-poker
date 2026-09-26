@@ -25,11 +25,13 @@ one half's brains think while the other half's games move.
 
     python -m bloons.train --generations 300          # resumes from data/train/ if present
     python -m bloons.train --run states --start-from art --states 3
+    python -m bloons.train --run states20 --start-from data/winner_states_gen20.npy --states 3
 """
 import argparse
 import json
 import multiprocessing as mp
 import time
+from pathlib import Path
 from multiprocessing import shared_memory
 
 import numpy as np
@@ -289,7 +291,7 @@ def main():
     ap.add_argument("--lr", type=float, default=0.02)
     ap.add_argument("--workers", type=int, default=7)
     ap.add_argument("--run", default="linear")
-    ap.add_argument("--start-from", help="a run whose current read-out this one starts from")
+    ap.add_argument("--start-from", help="a run whose current read-out this one starts from, or a saved read-out (.npy)")
     ap.add_argument("--states", type=int, default=1, choices=(1, 3),
                     help="3: separate gaze and press weights for holding nothing / holding a tower / a tower selected")
     args = ap.parse_args()
@@ -309,9 +311,11 @@ def main():
         rng = np.random.default_rng(gen0)
         print(f"resuming {OUT.name} at generation {gen0}")
     elif args.start_from:
-        theta, gen0 = expand(np.load(DATA_DIR / "train" / args.start_from / "state.npz")["theta"], T, args.states), 0
+        src = Path(args.start_from)
+        start = np.load(src) if src.suffix == ".npy" else np.load(DATA_DIR / "train" / args.start_from / "state.npz")["theta"]
+        theta, gen0 = expand(start, T, args.states), 0
         opt = Adam(len(theta), args.lr)
-        print(f"starting from {args.start_from}'s current read-out")
+        print(f"starting from {args.start_from}" + ("" if src.suffix == ".npy" else "'s current read-out"))
     else:
         theta, gen0 = initial(T, rng, args.states), 0
         opt = Adam(len(theta), args.lr)
