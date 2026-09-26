@@ -75,8 +75,8 @@ def worker(conn, lo, hi, owner, n_columns, colours_name, actions_name, states_na
         cmd, arg = conn.recv()
         if cmd == "stop":
             break
-        if cmd == "reset":
-            games = [Game(seed=arg) for _ in range(n)]
+        if cmd == "reset":                                   # one seed for every game, or one per fly
+            games = [Game(seed=arg[lo + i] if isinstance(arg, (list, tuple)) else arg) for i in range(n)]
             mice = [Mouse(g) for g in games]
             done = np.zeros(n, bool); fitness = np.zeros(n); idle = np.zeros(n, int); pops0 = np.zeros(n)
             counts = np.zeros((n, len(EVENTS)), int); frames = np.zeros(n, int)
@@ -256,13 +256,31 @@ def play(games, halves, photoreceptors, seed, max_frames=MAX_FRAMES):
         turn = 1 - turn
 
 
+def setup(A):
+    """The eye, and A flies' brains in two halves that take turns (see play):
+    (circuit, eye, halves, photoreceptors)."""
+    from flybrain.flyvis_eye import make_eye, FlyvisNetwork
+    from flybrain.motor import Motor, resting_output
+    from bloons.fly_player import Photoreceptors, fit_normalisation, norm_path
+    c, eye, net1 = make_eye()
+    rest = resting_output(net1, eye)
+    halves = []
+    for lo, hi in ((0, A // 2), (A // 2, A)):
+        net = FlyvisNetwork(c.weights, eye.dyn, n_agents=hi - lo, dt=net1.dt, device=net1.device)
+        net.bias = net1.bias.clone()
+        motor = Motor(c, eye, n_agents=hi - lo, rest=rest)
+        if not norm_path().exists():
+            print("fitting the read-outs' normalisation to this look ...", flush=True)
+            fit_normalisation(c, eye, net1, motor)
+        motor.load_normalisation(norm_path())
+        halves.append((lo, hi, net, motor))
+    return c, eye, halves, Photoreceptors(eye, net1.n_neurons, net1.device)
+
+
 def main():
     global OUT
     from flybrain import console_utf8  # noqa: F401
     from flybrain.connectome import DATA_DIR
-    from flybrain.flyvis_eye import make_eye, FlyvisNetwork
-    from flybrain.motor import Motor, resting_output
-    from bloons.fly_player import Photoreceptors, fit_normalisation, norm_path
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--generations", type=int, default=300)
@@ -278,21 +296,9 @@ def main():
     OUT = DATA_DIR / "train" / args.run
     OUT.mkdir(parents=True, exist_ok=True)
 
-    c, eye, net1 = make_eye()
     A = 2 * args.pairs + 1                                   # the last fly plays the current read-out itself
-    rest = resting_output(net1, eye)
-    halves = []
-    for lo, hi in ((0, A // 2), (A // 2, A)):
-        net = FlyvisNetwork(c.weights, eye.dyn, n_agents=hi - lo, dt=net1.dt, device=net1.device)
-        net.bias = net1.bias.clone()
-        motor = Motor(c, eye, n_agents=hi - lo, rest=rest)
-        if not norm_path().exists():
-            print("fitting the read-outs' normalisation to this look ...", flush=True)
-            fit_normalisation(c, eye, net1, motor)
-        motor.load_normalisation(norm_path())
-        halves.append((lo, hi, net, motor))
-    photoreceptors = Photoreceptors(eye, net1.n_neurons, net1.device)
-    T = motor.n_types
+    c, eye, halves, photoreceptors = setup(A)
+    T = halves[0][3].n_types
     rng = np.random.default_rng(0)
 
     state_file = OUT / "state.npz"
